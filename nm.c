@@ -153,7 +153,7 @@ void handle_view(int client_sock, Message *msg) {
         if (has_access) {
             if (show_details) {
                 char time_str[32];
-                struct tm *tm_info = localtime_r(&files[i]->accessed);
+                struct tm *tm_info = localtime(&files[i]->accessed); //changed localtime_r to localtime - S
                 strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", tm_info);
                 
                 pos += sprintf(buffer + pos, "%-20s %-8d %-8d %-20s %-10s\n",
@@ -215,11 +215,11 @@ void handle_info(int client_sock, Message *msg) {
     char created_str[32], modified_str[32], accessed_str[32];
     struct tm *tm_info;
     
-    tm_info = localtime_r(&meta->created);
+    tm_info = localtime(&meta->created); //changed localtime_r to localtime - S
     strftime(created_str, sizeof(created_str), "%Y-%m-%d %H:%M:%S", tm_info);
-    tm_info = localtime_r(&meta->modified);
+    tm_info = localtime(&meta->modified); //changed localtime_r to localtime - S
     strftime(modified_str, sizeof(modified_str), "%Y-%m-%d %H:%M:%S", tm_info);
-    tm_info = localtime_r(&meta->accessed);
+    tm_info = localtime(&meta->accessed); //changed localtime_r to localtime - S
     strftime(accessed_str, sizeof(accessed_str), "%Y-%m-%d %H:%M:%S", tm_info);
     
     sprintf(buffer, "File: %s\nOwner: %s\nCreated: %s\nLast Modified: %s\n"

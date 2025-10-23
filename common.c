@@ -105,7 +105,7 @@ int recv_message(int sock, Message *msg) {
 char* get_timestamp() {
     static char timestamp[64];
     time_t now = time(NULL);
-    struct tm *tm_info = localtime_r(&now);
+    struct tm *tm_info = localtime(&now); //changed localtime_r to localtime - S
     strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", tm_info);
     return timestamp;
 }
