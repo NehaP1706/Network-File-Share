@@ -1,12 +1,12 @@
 #include "common.h"
 
-#define NM_IP "127.0.0.1"
-#define NM_PORT 8081
-
+// Add struct elements to store nm server ip and port for connection (8081) - N
 typedef struct {
     char username[MAX_USERNAME];
     int nm_sock;
     int connected;
+    char nm_ip[INET_ADDRSTRLEN];
+    int nm_port;
 } Client;
 
 Client client;
@@ -47,22 +47,32 @@ void connect_to_nm() {
         exit(1);
     }
     
+    // Make client connect to NM server using stored ip and port - N
     struct sockaddr_in nm_addr;
     nm_addr.sin_family = AF_INET;
-    nm_addr.sin_port = htons(NM_PORT);
-    inet_pton(AF_INET, NM_IP, &nm_addr.sin_addr);
+    nm_addr.sin_port = htons(client.nm_port);
+    inet_pton(AF_INET, client.nm_ip, &nm_addr.sin_addr);
     
     if (connect(client.nm_sock, (struct sockaddr*)&nm_addr, sizeof(nm_addr)) < 0) {
         perror("Connection to NM failed");
         exit(1);
     }
-    
-    // Send registration
+
     Message msg;
     init_message(&msg);
+    
+    struct sockaddr_in local_addr;
+    socklen_t addr_len = sizeof(local_addr);
+    if (getsockname(client.nm_sock, (struct sockaddr*)&local_addr, &addr_len) == 0) {
+        inet_ntop(AF_INET, &local_addr.sin_addr, msg.data, INET_ADDRSTRLEN);
+    } else {
+        // Fallback: use loopback if we can't get the actual IP
+        strcpy(msg.data, "127.0.0.1");
+    }
+    
+    // Send registration
     msg.type = MSG_REG_CLIENT;
     strcpy(msg.sender, client.username);
-    strcpy(msg.data, "127.0.0.1");
     
     send_message(client.nm_sock, &msg);
     
@@ -71,7 +81,7 @@ void connect_to_nm() {
     
     if (response.status == SUCCESS) {
         client.connected = 1;
-        printf("[Client] Connected to Name Server\n");
+        printf("[Client] Connected to Name Server at %s:%d\n", client.nm_ip, client.nm_port);
     } else {
         printf("[Client] Registration failed\n");
         exit(1);
@@ -667,7 +677,29 @@ void command_loop() {
     }
 }
 
-int main() {
+// Allow the user client to set ip and port of the nm server to connect to at registration, specified to be known in the docs - N
+int main(int argc, char *argv[]) {
+    if (argc != 3) {
+        printf("Usage: %s <nm_ip> <nm_port>\n", argv[0]);
+        printf("Example: %s 127.0.0.1 8081\n", argv[0]);
+        return 1;
+    }
+    
+    // Parse command-line arguments
+    strncpy(client.nm_ip, argv[1], INET_ADDRSTRLEN - 1);
+    client.nm_ip[INET_ADDRSTRLEN - 1] = '\0';
+    client.nm_port = atoi(argv[2]);
+    
+    // Validate port
+    if (client.nm_port <= 0 || client.nm_port > 65535) {
+        printf("Error: Invalid port number. Must be between 1 and 65535.\n");
+        return 1;
+    }
+    else if (client.nm_port != 8081) {
+        printf("Error: To register as a user, you must register under port 8081.\n");
+        return 1;
+    }
+    
     init_client();
     connect_to_nm();
     command_loop();
