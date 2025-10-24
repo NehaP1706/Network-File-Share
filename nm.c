@@ -311,7 +311,6 @@ void handle_create(int client_sock, Message *msg) {
     init_message(&ss_msg);
     ss_msg.type = MSG_CREATE;
     strcpy(ss_msg.filename, msg->filename);
-    printf("Creating file %s\n", ss_msg.filename);
     
     send_message(nm.ss_list[ss_idx].sock, &ss_msg);
     

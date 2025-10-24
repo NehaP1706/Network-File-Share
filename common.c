@@ -118,7 +118,6 @@ int recv_message(int sock, Message *msg) {
     }
     
     buffer[len] = '\0';
-    printf("Received message: %s\n", buffer);
     deserialize_message(buffer, msg);
     
     return 0;
