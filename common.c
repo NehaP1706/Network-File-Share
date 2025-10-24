@@ -26,25 +26,46 @@ void serialize_message(Message *msg, char *buffer) {
 
 void deserialize_message(char *buffer, Message *msg) {
     init_message(msg);
-    char *token;
-    char *rest = buffer;
+    char *p = buffer;
     int field = 0;
-    
-    while ((token = strtok_r(rest, "|", &rest)) && field < 10) {
-        switch(field) {
-            case 0: msg->type = atoi(token); break;
-            case 1: msg->status = atoi(token); break;
-            case 2: strncpy(msg->sender, token, MAX_USERNAME-1); break;
-            case 3: strncpy(msg->filename, token, MAX_FILENAME-1); break;
-            case 4: msg->sentence_index = atoi(token); break;
-            case 5: msg->word_index = atoi(token); break;
-            case 6: msg->ss_id = atoi(token); break;
-            case 7: msg->access = atoi(token); break;
-            case 8: strncpy(msg->target_user, token, MAX_USERNAME-1); break;
-            case 9: strncpy(msg->data, token, MAX_BUFFER-1); break;
+
+    while (field < 10 && p) {
+        char *sep = strchr(p, '|');
+        size_t len = sep ? (size_t)(sep - p) : strlen(p);
+
+        /* create a temporary null-terminated token (may be empty) */
+        char token_buf[MAX_BUFFER];
+        if (len > sizeof(token_buf) - 1) len = sizeof(token_buf) - 1;
+        memcpy(token_buf, p, len);
+        token_buf[len] = '\0';
+
+        if (len > 0) {
+            switch (field) {
+                case 0: msg->type = atoi(token_buf); break;
+                case 1: msg->status = atoi(token_buf); break;
+                case 2: strncpy(msg->sender, token_buf, MAX_USERNAME-1); msg->sender[MAX_USERNAME-1] = '\0'; break;
+                case 3: strncpy(msg->filename, token_buf, MAX_FILENAME-1); msg->filename[MAX_FILENAME-1] = '\0'; break;
+                case 4: msg->sentence_index = atoi(token_buf); break;
+                case 5: msg->word_index = atoi(token_buf); break;
+                case 6: msg->ss_id = atoi(token_buf); break;
+                case 7: msg->access = atoi(token_buf); break;
+                case 8: strncpy(msg->target_user, token_buf, MAX_USERNAME-1); msg->target_user[MAX_USERNAME-1] = '\0'; break;
+                case 9: strncpy(msg->data, token_buf, MAX_BUFFER-1); msg->data[MAX_BUFFER-1] = '\0'; break;
+            }
+        } else {
+            /* empty token: keep defaults from init_message() for numeric fields,
+               and leave strings as empty (already zeroed by init_message). */
+            if (field == 2) msg->sender[0] = '\0';
+            if (field == 3) msg->filename[0] = '\0';
+            if (field == 8) msg->target_user[0] = '\0';
+            if (field == 9) msg->data[0] = '\0';
         }
+
         field++;
+        if (!sep) break;
+        p = sep + 1;
     }
+    // implemented a parser that can handle empty fields correctly instead of strtok and strtok_r - S
 }
 
 int send_message(int sock, Message *msg) {
@@ -97,6 +118,7 @@ int recv_message(int sock, Message *msg) {
     }
     
     buffer[len] = '\0';
+    printf("Received message: %s\n", buffer);
     deserialize_message(buffer, msg);
     
     return 0;

@@ -311,6 +311,7 @@ void handle_create(int client_sock, Message *msg) {
     init_message(&ss_msg);
     ss_msg.type = MSG_CREATE;
     strcpy(ss_msg.filename, msg->filename);
+    printf("Creating file %s\n", ss_msg.filename);
     
     send_message(nm.ss_list[ss_idx].sock, &ss_msg);
     
@@ -568,8 +569,8 @@ void* handle_ss_connection(void* arg) {
     int idx = nm.ss_count;
     nm.ss_list[idx].id = msg.ss_id;
     strcpy(nm.ss_list[idx].ip, msg.sender);
-    nm.ss_list[idx].nm_port = msg.word_index;
-    nm.ss_list[idx].client_port = msg.sentence_index;
+    nm.ss_list[idx].nm_port = msg.word_index; //sus
+    nm.ss_list[idx].client_port = msg.sentence_index; //sus
     nm.ss_list[idx].sock = ss_sock;
     nm.ss_list[idx].active = 1;
     nm.ss_list[idx].last_heartbeat = time(NULL);
