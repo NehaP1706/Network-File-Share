@@ -85,7 +85,7 @@ int parse_file(const char *filepath, FileContent *fc) {
     
     fc->sentence_count = 0;
     
-    char buffer[MAX_BUFFER];
+    // char buffer[MAX_BUFFER];
     char word[MAX_WORD];
     int word_idx = 0;
     

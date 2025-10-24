@@ -759,6 +759,8 @@ void* handle_client_connection(void* arg) {
 }
 
 void* ss_listener(void* arg) {
+    (void) arg;
+
     nm.ss_sock = socket(AF_INET, SOCK_STREAM, 0);
     int opt = 1;
     setsockopt(nm.ss_sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
@@ -791,6 +793,7 @@ void* ss_listener(void* arg) {
 }
 
 void* client_listener(void* arg) {
+    (void) arg;
     nm.client_sock = socket(AF_INET, SOCK_STREAM, 0);
     int opt = 1;
     setsockopt(nm.client_sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
@@ -823,6 +826,8 @@ void* client_listener(void* arg) {
 }
 
 void* heartbeat_monitor(void* arg) {
+    (void) arg;
+    
     while (nm.running) {
         sleep(5);
         

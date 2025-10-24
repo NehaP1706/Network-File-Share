@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -pthread -g
+CFLAGS = -Wall -Wextra -Wno-format-truncation -pthread -g
 LDFLAGS = -pthread
 
 # Object files for common modules

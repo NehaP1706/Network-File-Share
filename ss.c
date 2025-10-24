@@ -65,6 +65,7 @@ void init_storage_server(const char *nm_ip, int nm_port, int client_port) {
     init_logger(log_file);
     
     printf("[SS %d] Storage Server initialized\n", ss.id);
+    printf("[SS %d] Storage Server connected to Name server at %s:%d\n", ss.id, nm_ip, nm_port);
     printf("[SS %d] Storage path: %s\n", ss.id, ss.storage_path);
     printf("[SS %d] Client port: %d\n", ss.id, ss.client_port);
 }
@@ -467,6 +468,7 @@ void* handle_client_request(void* arg) {
 }
 
 void* handle_nm_communication(void* arg) {
+    (void)arg;
     Message msg;
     
     while (ss.running) {
@@ -531,6 +533,8 @@ void* handle_nm_communication(void* arg) {
 }
 
 void* client_listener(void* arg) {
+    (void)arg;
+
     ss.client_sock = socket(AF_INET, SOCK_STREAM, 0);
     if (ss.client_sock < 0) {
         perror("Client socket creation failed");
@@ -581,6 +585,8 @@ void* client_listener(void* arg) {
 }
 
 void* heartbeat_thread(void* arg) {
+    (void)arg;
+
     Message msg;
     init_message(&msg);
     msg.type = MSG_ACK;
