@@ -1,4 +1,5 @@
 #include "common.h"
+#include "logger.h"
 
 // Add struct elements to store nm server ip and port for connection (8081) - N
 typedef struct {
@@ -36,6 +37,15 @@ void init_client() {
     trim_whitespace(client.username);
     
     client.connected = 0;
+
+    // Initialize logger for client
+    char instance_name[64];
+    snprintf(instance_name, sizeof(instance_name), "Client_%s", client.username);
+    set_instance_name(instance_name);  // ADD THIS LINE
+    
+    char log_file[128];
+    snprintf(log_file, sizeof(log_file), "client_%s.log", client.username);
+    init_logger(log_file);  // ADD THIS LINE
     
     printf("[Client] Username: %s\n", client.username);
 }
@@ -218,10 +228,22 @@ void handle_create(char *filename) {
     strcpy(msg.sender, client.username);
     strcpy(msg.filename, filename);
     
-    send_message(client.nm_sock, &msg);
+    printf("[DEBUG] Sending CREATE request for: %s\n", filename);
+    
+    if (send_message(client.nm_sock, &msg) < 0) {
+        printf("[DEBUG] Failed to send message\n");
+        return;
+    }
+    
+    printf("[DEBUG] Waiting for response...\n");
     
     Message response;
-    recv_message(client.nm_sock, &response);
+    if (recv_message(client.nm_sock, &response) < 0) {
+        printf("[DEBUG] Failed to receive response\n");
+        return;
+    }
+    
+    printf("[DEBUG] Received response: type=%d, status=%d\n", response.type, response.status);
     
     if (response.status == SUCCESS) {
         printf("File created successfully!\n");
@@ -705,5 +727,6 @@ int main(int argc, char *argv[]) {
     command_loop();
     
     close(client.nm_sock);
+    close_logger();  
     return 0;
 }

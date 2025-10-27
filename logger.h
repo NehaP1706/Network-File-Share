@@ -15,6 +15,9 @@ typedef enum {
 // Initialize logger with filename
 int init_logger(const char *log_filename);
 
+// Set instance name (NM, SS_xxxx, Client_xxxx)
+void set_instance_name(const char *name);
+
 // Close logger
 void close_logger();
 

@@ -55,6 +55,7 @@ void init_name_server() {
     pthread_mutex_init(&nm.ss_mutex, NULL);
     pthread_mutex_init(&nm.client_mutex, NULL);
     
+    set_instance_name("NM");  // ADD THIS LINE
     init_logger("nm.log");
     
     printf("[NM] Name Server initialized\n");

@@ -58,6 +58,11 @@ void init_storage_server(const char *nm_ip, int nm_port, int client_port) {
     
     pthread_mutex_init(&ss.locks_mutex, NULL);
     ss.file_lock_count = 0;
+
+    // Initialize logger with instance name
+    char instance_name[64];
+    snprintf(instance_name, sizeof(instance_name), "SS_%d", ss.id);
+    set_instance_name(instance_name);  // ADD THIS LINE
     
     // Initialize logger
     char log_file[128];

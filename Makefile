@@ -17,8 +17,8 @@ ss: ss.o $(COMMON_OBJS)
 	$(CC) $(LDFLAGS) -o ss ss.o $(COMMON_OBJS)
 
 # Client
-client: client.o common.o
-	$(CC) $(LDFLAGS) -o client client.o common.o
+client: client.o common.o logger.o
+	$(CC) $(LDFLAGS) -o client client.o common.o logger.o
 
 # Object files
 nm.o: nm.c common.h logger.h trie.h cache.h
@@ -47,7 +47,7 @@ trie.o: trie.c trie.h common.h
 
 # Clean
 clean:
-	rm -f *.o nm ss client
+	rm -f *.o nm ss client *.txt 
 	rm -f *.log
 	rm -rf ss_storage_*
 
