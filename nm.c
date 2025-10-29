@@ -612,15 +612,30 @@ void* handle_ss_connection(void* arg) {
             break;
         }
         
-        pthread_mutex_lock(&nm.ss_mutex);
-        for (int i = 0; i < nm.ss_count; i++) {
-            if (nm.ss_list[i].id == msg.ss_id) {
-                nm.ss_list[i].last_heartbeat = time(NULL);
-                break;
+        if (msg.type == MSG_ACK && strcmp(msg.data, "HEARTBEAT") == 0) {
+            pthread_mutex_lock(&nm.ss_mutex);
+            for (int i = 0; i < nm.ss_count; i++) {
+                if (nm.ss_list[i].sock == ss_sock) {
+                    nm.ss_list[i].last_heartbeat = time(NULL);
+                    log_formatted(LOG_DEBUG, "Heartbeat received from SS %d", 
+                                 nm.ss_list[i].id);
+                    break;
+                }
             }
+            pthread_mutex_unlock(&nm.ss_mutex);
+            // Don't send response - heartbeats are one-way
         }
-        pthread_mutex_unlock(&nm.ss_mutex);
     }
+
+    pthread_mutex_lock(&nm.ss_mutex);
+    for (int i = 0; i < nm.ss_count; i++) {
+        if (nm.ss_list[i].sock == ss_sock) {
+            nm.ss_list[i].active = 0;
+            log_formatted(LOG_WARNING, "SS %d disconnected", nm.ss_list[i].id);
+            break;
+        }
+    }
+    pthread_mutex_unlock(&nm.ss_mutex);
     
     close(ss_sock);
     return NULL;

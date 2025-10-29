@@ -92,6 +92,7 @@ void connect_to_nm() {
     if (response.status == SUCCESS) {
         client.connected = 1;
         printf("[Client] Connected to Name Server at %s:%d\n", client.nm_ip, client.nm_port);
+        log_formatted(LOG_INFO, "Connected to NM at %s:%d", client.nm_ip, client.nm_port);
     } else {
         printf("[Client] Registration failed\n");
         exit(1);
