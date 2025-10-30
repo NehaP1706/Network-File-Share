@@ -1,4 +1,5 @@
 #include "file_ops.h"
+#include "logger.h"
 #include <ctype.h>
 
 FileContent* init_file_content() {
@@ -62,11 +63,6 @@ char** split_by_delimiters(const char *word, int *count) {
         } else {
             buffer[buf_idx++] = word[i];
         }
-    }
-
-    if (strlen(buffer) > 0) {
-        parts[*count] = strdup(buffer);
-        (*count)++;
     }
     
     // Save remaining buffer
@@ -239,20 +235,31 @@ char* file_content_to_string(FileContent *fc) {
 }
 
 int insert_word_in_sentence(FileContent *fc, int sent_idx, int word_idx, const char *word) {
-    if (sent_idx < 0 || sent_idx >= fc->sentence_count) return -1;
+    if (sent_idx < 0 || sent_idx >= fc->sentence_count) {
+        log_formatted(LOG_ERROR, "Invalid sentence index: %d (file has %d sentences)", 
+                     sent_idx, fc->sentence_count);
+        return -1;
+    }
     
     Sentence *sent = &fc->sentences[sent_idx];
     
-    // word_idx is 1-based, convert to 0-based
-    int actual_idx = word_idx - 1;
-    if (actual_idx < 0 || actual_idx > sent->word_count) return -1;
+    // word_idx is 1-based, validate directly
+    if (word_idx < 1 || word_idx > sent->word_count + 1) {
+        log_formatted(LOG_ERROR, "Invalid word index: %d (sentence has %d words, valid range: 1-%d)", 
+                     word_idx, sent->word_count, sent->word_count + 1);
+        return -1;
+    }
     
-    // Check if word contains delimiters
+    // Convert to 0-based
+    int actual_idx = word_idx - 1;
+    
+    // Split word by delimiters
     int part_count;
     char **parts = split_by_delimiters(word, &part_count);
     
     if (part_count == 0) {
         free(parts);
+        log_formatted(LOG_WARNING, "Empty word, skipping insertion");
         return 0;
     }
     
@@ -264,6 +271,9 @@ int insert_word_in_sentence(FileContent *fc, int sent_idx, int word_idx, const c
         }
     }
     
+    log_formatted(LOG_DEBUG, "Inserting %d parts, %d will create new sentences", 
+                 part_count, new_sentences);
+    
     // Make room for new sentences if needed
     if (new_sentences > 0) {
         int new_total = fc->sentence_count + new_sentences;
@@ -272,15 +282,22 @@ int insert_word_in_sentence(FileContent *fc, int sent_idx, int word_idx, const c
             fc->sentences = realloc(fc->sentences, sizeof(Sentence) * fc->capacity);
         }
         
-        // Shift existing sentences
+        // Shift existing sentences down to make room
         for (int i = fc->sentence_count - 1; i > sent_idx; i--) {
             fc->sentences[i + new_sentences] = fc->sentences[i];
+        }
+        
+        // Initialize new sentence slots
+        for (int i = 1; i <= new_sentences; i++) {
+            fc->sentences[sent_idx + i].capacity = 10;
+            fc->sentences[sent_idx + i].word_count = 0;
+            fc->sentences[sent_idx + i].words = malloc(sizeof(char*) * 10);
         }
     }
     
     // Insert parts
-    int current_sent = sent_idx;
-    Sentence *cur_sent = &fc->sentences[current_sent];
+    int current_sent_offset = 0;
+    Sentence *cur_sent = &fc->sentences[sent_idx];
     
     for (int i = 0; i < part_count; i++) {
         if (is_delimiter(parts[i][0])) {
@@ -289,18 +306,22 @@ int insert_word_in_sentence(FileContent *fc, int sent_idx, int word_idx, const c
                 cur_sent->capacity *= 2;
                 cur_sent->words = realloc(cur_sent->words, sizeof(char*) * cur_sent->capacity);
             }
-            cur_sent->words[cur_sent->word_count++] = strdup(parts[i]);
             
-            // Start new sentence
-            current_sent++;
-            fc->sentences[current_sent].capacity = 10;
-            fc->sentences[current_sent].word_count = 0;
-            fc->sentences[current_sent].words = malloc(sizeof(char*) * fc->sentences[current_sent].capacity);
-            cur_sent = &fc->sentences[current_sent];
+            // Shift words in current sentence to make room
+            for (int j = cur_sent->word_count; j > actual_idx; j--) {
+                cur_sent->words[j] = cur_sent->words[j - 1];
+            }
+            
+            cur_sent->words[actual_idx] = strdup(parts[i]);
+            cur_sent->word_count++;
+            
+            // Move to next sentence
+            current_sent_offset++;
+            cur_sent = &fc->sentences[sent_idx + current_sent_offset];
             actual_idx = 0;  // Reset index for new sentence
         } else {
             // Expand words array if needed
-            if (cur_sent->word_count + 1 >= cur_sent->capacity) {
+            if (cur_sent->word_count >= cur_sent->capacity) {
                 cur_sent->capacity *= 2;
                 cur_sent->words = realloc(cur_sent->words, sizeof(char*) * cur_sent->capacity);
             }
@@ -315,11 +336,14 @@ int insert_word_in_sentence(FileContent *fc, int sent_idx, int word_idx, const c
             cur_sent->word_count++;
             actual_idx++;
         }
+        
         free(parts[i]);
     }
     free(parts);
     
     fc->sentence_count += new_sentences;
+    log_formatted(LOG_DEBUG, "After insertion, file has %d sentences", fc->sentence_count);
+    
     return new_sentences;
 }
 

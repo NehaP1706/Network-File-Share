@@ -31,6 +31,10 @@
 #define CACHE_SIZE 100
 #define STREAM_DELAY 100000  // 0.1 seconds in microseconds
 
+#define MAX_WORDS_PER_SENTENCE 10
+#define MAX_SENTENCES 1000
+#define SENTENCE_CAPACITY 10
+
 // Error Codes
 #define SUCCESS 200
 #define ERR_FILE_NOT_FOUND 404
@@ -151,5 +155,6 @@ void serialize_message(Message *msg, char *buffer);
 void deserialize_message(char *buffer, Message *msg);
 char* get_timestamp();
 void trim_whitespace(char *str);
+int set_socket_timeouts(int sock, int send_timeout_sec, int recv_timeout_sec);
 
 #endif // COMMON_H

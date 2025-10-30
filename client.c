@@ -154,6 +154,8 @@ int connect_to_ss(const char *ss_info) {
         close(ss_sock);
         return -1;
     }
+
+    log_formatted(LOG_INFO, "Connected to SS at %s:%d", ip, port);
     
     return ss_sock;
 }
@@ -166,10 +168,6 @@ void handle_view(char *args) {
     
     if (args) {
         strncpy(msg.data, args, MAX_BUFFER - 1);
-        msg.data[MAX_BUFFER - 1] = '\0';
-    }
-    else {
-        msg.data[0] = '\0';
     }
     
     send_message(client.nm_sock, &msg);
@@ -646,7 +644,7 @@ void command_loop() {
 
         char* cmd = argv[0];
         
-        // // Parse command
+        // Parse command
         // char cmd[64], arg1[MAX_FILENAME], arg2[MAX_FILENAME], arg3[MAX_USERNAME];
         // int argc = sscanf(line, "%s %s %s %s", cmd, arg1, arg2, arg3);
         

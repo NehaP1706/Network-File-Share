@@ -1,4 +1,26 @@
 #include "common.h"
+#include <sys/time.h> 
+
+// Set socket timeouts to prevent indefinite blocking
+int set_socket_timeouts(int sock, int send_timeout_sec, int recv_timeout_sec) {
+    struct timeval tv;
+    
+    // Set send timeout
+    tv.tv_sec = send_timeout_sec;
+    tv.tv_usec = 0;
+    if (setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv)) < 0) {
+        return -1;
+    }
+    
+    // Set receive timeout
+    tv.tv_sec = recv_timeout_sec;
+    tv.tv_usec = 0;
+    if (setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
+        return -1;
+    }
+    
+    return 0;
+}
 
 void init_message(Message *msg) {
     memset(msg, 0, sizeof(Message));

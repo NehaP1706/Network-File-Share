@@ -1,3 +1,4 @@
+
 #include "common.h"
 #include "logger.h"
 #include "trie.h"
@@ -15,6 +16,7 @@ typedef struct {
     StorageServerInfo ss_list[MAX_SS];
     int ss_count;
     pthread_mutex_t ss_mutex;
+    pthread_mutex_t ss_sock_mutexes[MAX_SS];  // ADD: One mutex per SS socket
     int next_ss_id;
     
     ClientInfo client_list[MAX_CLIENTS];
@@ -28,7 +30,7 @@ typedef struct {
 
 NameServer nm;
 
-// Function declarations
+// Function declarations (same as before)
 void* handle_ss_connection(void* arg);
 void* handle_client_connection(void* arg);
 void* ss_listener(void* arg);
@@ -56,7 +58,12 @@ void init_name_server() {
     pthread_mutex_init(&nm.ss_mutex, NULL);
     pthread_mutex_init(&nm.client_mutex, NULL);
     
-    set_instance_name("NM");  // ADD THIS LINE
+    // ADD: Initialize per-SS socket mutexes
+    for (int i = 0; i < MAX_SS; i++) {
+        pthread_mutex_init(&nm.ss_sock_mutexes[i], NULL);
+    }
+    
+    set_instance_name("NM");
     init_logger("nm.log");
     
     printf("[NM] Name Server initialized\n");
@@ -216,26 +223,34 @@ void handle_info(int client_sock, Message *msg) {
     int ss_id = find_ss_for_file(msg->filename);
     if (ss_id >= 0) {
         pthread_mutex_lock(&nm.ss_mutex);
+        int ss_idx = -1;
         for (int i = 0; i < nm.ss_count; i++) {
             if (nm.ss_list[i].id == ss_id) {
-                Message ss_req;
-                init_message(&ss_req);
-                ss_req.type = MSG_SS_INFO;
-                strcpy(ss_req.filename, msg->filename);
-                
-                send_message(nm.ss_list[i].sock, &ss_req);
-                
-                Message ss_resp;
-                if (recv_message(nm.ss_list[i].sock, &ss_resp) == 0 && 
-                    ss_resp.status == SUCCESS) {
-                    sscanf(ss_resp.data, "%zu|%d|%d|%ld|%ld",
-                           &meta->size, &meta->word_count, &meta->char_count,
-                           &meta->modified, &meta->accessed);
-                }
+                ss_idx = i;
                 break;
             }
         }
         pthread_mutex_unlock(&nm.ss_mutex);
+        
+        if (ss_idx >= 0) {
+            Message ss_req;
+            init_message(&ss_req);
+            ss_req.type = MSG_SS_INFO;
+            strcpy(ss_req.filename, msg->filename);
+            
+            // FIXED: Lock the specific SS socket
+            pthread_mutex_lock(&nm.ss_sock_mutexes[ss_idx]);
+            send_message(nm.ss_list[ss_idx].sock, &ss_req);
+            
+            Message ss_resp;
+            if (recv_message(nm.ss_list[ss_idx].sock, &ss_resp) == 0 && 
+                ss_resp.status == SUCCESS) {
+                sscanf(ss_resp.data, "%zu|%d|%d|%ld|%ld",
+                       &meta->size, &meta->word_count, &meta->char_count,
+                       &meta->modified, &meta->accessed);
+            }
+            pthread_mutex_unlock(&nm.ss_sock_mutexes[ss_idx]);
+        }
     }
     
     char buffer[MAX_BUFFER];
@@ -326,9 +341,9 @@ void handle_create(int client_sock, Message *msg) {
             break;
         }
     }
+    pthread_mutex_unlock(&nm.ss_mutex);
     
     if (ss_idx < 0) {
-        pthread_mutex_unlock(&nm.ss_mutex);
         response.status = ERR_SS_UNAVAILABLE;
         send_message(client_sock, &response);
         return;
@@ -339,11 +354,13 @@ void handle_create(int client_sock, Message *msg) {
     ss_msg.type = MSG_CREATE;
     strcpy(ss_msg.filename, msg->filename);
     
+    // FIXED: Lock the specific SS socket
+    pthread_mutex_lock(&nm.ss_sock_mutexes[ss_idx]);
     send_message(nm.ss_list[ss_idx].sock, &ss_msg);
     
     Message ss_response;
     recv_message(nm.ss_list[ss_idx].sock, &ss_response);
-    pthread_mutex_unlock(&nm.ss_mutex);
+    pthread_mutex_unlock(&nm.ss_sock_mutexes[ss_idx]);
     
     if (ss_response.status == SUCCESS) {
         // Add to trie
@@ -402,9 +419,9 @@ void handle_delete(int client_sock, Message *msg) {
             break;
         }
     }
+    pthread_mutex_unlock(&nm.ss_mutex);
     
     if (ss_idx < 0) {
-        pthread_mutex_unlock(&nm.ss_mutex);
         response.status = ERR_SS_UNAVAILABLE;
         send_message(client_sock, &response);
         return;
@@ -415,11 +432,13 @@ void handle_delete(int client_sock, Message *msg) {
     ss_msg.type = MSG_DELETE;
     strcpy(ss_msg.filename, msg->filename);
     
+    // FIXED: Lock the specific SS socket
+    pthread_mutex_lock(&nm.ss_sock_mutexes[ss_idx]);
     send_message(nm.ss_list[ss_idx].sock, &ss_msg);
     
     Message ss_response;
     recv_message(nm.ss_list[ss_idx].sock, &ss_response);
-    pthread_mutex_unlock(&nm.ss_mutex);
+    pthread_mutex_unlock(&nm.ss_sock_mutexes[ss_idx]);
     
     if (ss_response.status == SUCCESS) {
         trie_delete(nm.file_trie, msg->filename);
@@ -528,9 +547,9 @@ void handle_exec(int client_sock, Message *msg) {
             break;
         }
     }
+    pthread_mutex_unlock(&nm.ss_mutex);
     
     if (ss_idx < 0) {
-        pthread_mutex_unlock(&nm.ss_mutex);
         response.status = ERR_SS_UNAVAILABLE;
         send_message(client_sock, &response);
         return;
@@ -542,11 +561,13 @@ void handle_exec(int client_sock, Message *msg) {
     strcpy(ss_msg.filename, msg->filename);
     strcpy(ss_msg.data, "READ_CONTENT");
     
+    // FIXED: Lock the specific SS socket
+    pthread_mutex_lock(&nm.ss_sock_mutexes[ss_idx]);
     send_message(nm.ss_list[ss_idx].sock, &ss_msg);
     
     Message ss_response;
     recv_message(nm.ss_list[ss_idx].sock, &ss_response);
-    pthread_mutex_unlock(&nm.ss_mutex);
+    pthread_mutex_unlock(&nm.ss_sock_mutexes[ss_idx]);
     
     if (ss_response.status != SUCCESS) {
         response.status = ss_response.status;
@@ -595,8 +616,8 @@ void* handle_ss_connection(void* arg) {
     int idx = nm.ss_count;
     nm.ss_list[idx].id = msg.ss_id;
     strcpy(nm.ss_list[idx].ip, msg.sender);
-    nm.ss_list[idx].nm_port = msg.word_index; //sus
-    nm.ss_list[idx].client_port = msg.sentence_index; //sus
+    nm.ss_list[idx].nm_port = msg.word_index;
+    nm.ss_list[idx].client_port = msg.sentence_index;
     nm.ss_list[idx].sock = ss_sock;
     nm.ss_list[idx].active = 1;
     nm.ss_list[idx].last_heartbeat = time(NULL);
@@ -635,29 +656,30 @@ void* handle_ss_connection(void* arg) {
     // Handle ongoing communication (mainly heartbeats)
     while (nm.running) {
         if (recv_message(ss_sock, &msg) < 0) {
+            log_formatted(LOG_WARNING, "SS %d disconnected", msg.ss_id);
             break;
         }
         
-        if (msg.type == MSG_ACK && strcmp(msg.data, "HEARTBEAT") == 0) {
-            pthread_mutex_lock(&nm.ss_mutex);
-            for (int i = 0; i < nm.ss_count; i++) {
-                if (nm.ss_list[i].sock == ss_sock) {
-                    nm.ss_list[i].last_heartbeat = time(NULL);
-                    log_formatted(LOG_DEBUG, "Heartbeat received from SS %d", 
-                                 nm.ss_list[i].id);
-                    break;
-                }
+        // Update last heartbeat time
+        pthread_mutex_lock(&nm.ss_mutex);
+        for (int i = 0; i < nm.ss_count; i++) {
+            if (nm.ss_list[i].id == msg.ss_id) {
+                nm.ss_list[i].last_heartbeat = time(NULL);
+                log_formatted(LOG_DEBUG, "Received heartbeat from SS %d", msg.ss_id);
+                break;
             }
-            pthread_mutex_unlock(&nm.ss_mutex);
-            // Don't send response - heartbeats are one-way
         }
+        pthread_mutex_unlock(&nm.ss_mutex);
+        
+        // Don't send any response to heartbeats - this prevents the race condition
     }
-
+    
+    // Mark SS as inactive when connection is lost
     pthread_mutex_lock(&nm.ss_mutex);
     for (int i = 0; i < nm.ss_count; i++) {
-        if (nm.ss_list[i].sock == ss_sock) {
+        if (nm.ss_list[i].id == msg.ss_id) {
             nm.ss_list[i].active = 0;
-            log_formatted(LOG_WARNING, "SS %d disconnected", nm.ss_list[i].id);
+            log_formatted(LOG_INFO, "Marked SS %d as inactive", msg.ss_id);
             break;
         }
     }

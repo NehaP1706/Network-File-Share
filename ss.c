@@ -4,6 +4,8 @@
 
 #define SS_STORAGE_DIR "./ss_storage"
 #define HEARTBEAT_INTERVAL 5
+#define SENTENCE_CAPACITY 10
+#define SOCKET_TIMEOUT 10  
 
 static pthread_mutex_t nm_comm_mutex = PTHREAD_MUTEX_INITIALIZER;
 
@@ -16,7 +18,6 @@ typedef struct {
     int client_sock;
     char storage_path[MAX_PATH];
     
-    // Sentence locks for each file
     pthread_mutex_t locks_mutex;
     struct {
         char filename[MAX_FILENAME];
@@ -30,7 +31,6 @@ typedef struct {
 
 StorageServer ss;
 
-// Function declarations
 void* handle_nm_communication(void* arg);
 void* handle_client_request(void* arg);
 void* client_listener(void* arg);
@@ -54,7 +54,6 @@ void init_storage_server(const char *nm_ip, int nm_port, int client_port) {
     ss.id = getpid();
     ss.running = 1;
     
-    // Create storage directory
     snprintf(ss.storage_path, sizeof(ss.storage_path), "%s_%d", SS_STORAGE_DIR, ss.id);
     mkdir(ss.storage_path, 0777);
     
@@ -62,18 +61,16 @@ void init_storage_server(const char *nm_ip, int nm_port, int client_port) {
     pthread_mutex_init(&ss.locks_mutex, NULL);
     ss.file_lock_count = 0;
 
-    // Initialize logger with instance name
     char instance_name[64];
     snprintf(instance_name, sizeof(instance_name), "SS_%d", ss.id);
-    set_instance_name(instance_name);  // ADD THIS LINE
+    set_instance_name(instance_name);
     
-    // Initialize logger
     char log_file[128];
     snprintf(log_file, sizeof(log_file), "ss_%d.log", ss.id);
     init_logger(log_file);
     
     printf("[SS %d] Storage Server initialized\n", ss.id);
-    printf("[SS %d] Storage Server connected to Name server at %s:%d\n", ss.id, nm_ip, nm_port);
+    printf("[SS %d] Connecting to Name Server at %s:%d\n", ss.id, nm_ip, nm_port);
     printf("[SS %d] Storage path: %s\n", ss.id, ss.storage_path);
     printf("[SS %d] Client port: %d\n", ss.id, ss.client_port);
 }
@@ -84,6 +81,9 @@ void connect_to_nm(const char *nm_ip, int nm_port) {
         perror("Socket creation failed");
         exit(1);
     }
+    
+    // FIXED: Set socket timeouts
+    set_socket_timeouts(ss.nm_sock, SOCKET_TIMEOUT, SOCKET_TIMEOUT);
     
     struct sockaddr_in nm_addr;
     nm_addr.sin_family = AF_INET;
@@ -118,15 +118,12 @@ void scan_and_register_files() {
     int file_count = 0;
     
     while ((entry = readdir(dir)) != NULL) {
-        // Skip . and .. directories
         if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
             continue;
         }
         
-        // Skip undo files
         if (strstr(entry->d_name, ".undo") != NULL) continue;
         
-        // Build full filepath and check if it's a regular file
         char filepath[MAX_PATH];
         snprintf(filepath, sizeof(filepath), "%s/%s", ss.storage_path, entry->d_name);
         
@@ -254,32 +251,32 @@ int write_file_ss(const char *filename, int sent_idx, int word_idx, const char *
     char filepath[MAX_PATH];
     snprintf(filepath, sizeof(filepath), "%s/%s", ss.storage_path, filename);
     
-    // Create undo backup
+    log_formatted(LOG_DEBUG, "Write request: file=%s, sent=%d, word=%d, content='%s'", 
+                 filename, sent_idx, word_idx, content);
+    
     if (create_undo_backup(filepath) != 0) {
         log_formatted(LOG_WARNING, "Could not create undo backup (file might be empty)");
-        // Don't return error - file might be empty/new
     }
     
-    // Parse file
     FileContent *fc = init_file_content();
     if (parse_file(filepath, fc) != 0) {
         log_formatted(LOG_WARNING, "Could not parse file, treating as empty");
-        // Initialize with one empty sentence for new files
         fc->sentence_count = 1;
-        fc->sentences[0].capacity = 10;
+        fc->sentences[0].capacity = SENTENCE_CAPACITY;
         fc->sentences[0].word_count = 0;
         fc->sentences[0].words = malloc(sizeof(char*) * fc->sentences[0].capacity);
     }
     
-    // If file is empty, ensure at least one sentence exists
     if (fc->sentence_count == 0) {
+        log_formatted(LOG_DEBUG, "File is empty, initializing with one sentence");
         fc->sentence_count = 1;
-        fc->sentences[0].capacity = 10;
+        fc->sentences[0].capacity = SENTENCE_CAPACITY;
         fc->sentences[0].word_count = 0;
         fc->sentences[0].words = malloc(sizeof(char*) * fc->sentences[0].capacity);
     }
     
-    // Validate sentence index
+    log_formatted(LOG_DEBUG, "File has %d sentences before insertion", fc->sentence_count);
+    
     if (sent_idx < 0 || sent_idx >= fc->sentence_count) {
         log_formatted(LOG_ERROR, "Invalid sentence index: %d (file has %d sentences)", 
                      sent_idx, fc->sentence_count);
@@ -287,27 +284,35 @@ int write_file_ss(const char *filename, int sent_idx, int word_idx, const char *
         return ERR_INVALID_INDEX;
     }
     
-    // Insert word
+    int words_in_sentence = fc->sentences[sent_idx].word_count;
+    log_formatted(LOG_DEBUG, "Sentence %d has %d words, inserting at position %d", 
+                 sent_idx, words_in_sentence, word_idx);
+    
     int new_sentences = insert_word_in_sentence(fc, sent_idx, word_idx, content);
     if (new_sentences < 0) {
-        log_formatted(LOG_ERROR, "Failed to insert word at index %d", word_idx);
+        log_formatted(LOG_ERROR, "Failed to insert word '%s' at sentence %d, word index %d "
+                     "(sentence had %d words, valid range: 1-%d)", 
+                     content, sent_idx, word_idx, words_in_sentence, words_in_sentence + 1);
         free_file_content(fc);
         return ERR_INVALID_INDEX;
     }
     
-    // Update locks if new sentences were created
+    log_formatted(LOG_DEBUG, "Insertion successful, %d new sentences created, file now has %d sentences", 
+                 new_sentences, fc->sentence_count);
+    
     if (new_sentences > 0) {
+        log_formatted(LOG_DEBUG, "Expanding locks to %d sentences", fc->sentence_count);
         init_file_locks(filename, fc->sentence_count);
     }
     
-    // Write back to file
     if (write_file_content(filepath, fc) != 0) {
+        log_formatted(LOG_ERROR, "Failed to write file content back to disk");
         free_file_content(fc);
         return ERR_SERVER_ERROR;
     }
     
     free_file_content(fc);
-    log_formatted(LOG_INFO, "Wrote to file: %s at sentence %d, word %d", 
+    log_formatted(LOG_INFO, "Successfully wrote to file: %s at sentence %d, word %d", 
                  filename, sent_idx, word_idx);
     return SUCCESS;
 }
@@ -383,7 +388,6 @@ int stream_file_ss(int client_sock, const char *filename) {
         }
     }
     
-    // Send stop signal
     msg.type = MSG_STOP;
     send_message(client_sock, &msg);
     
@@ -415,6 +419,9 @@ int get_file_info_ss(const char *filename, FileMetadata *meta) {
 void* handle_client_request(void* arg) {
     int client_sock = *((int*)arg);
     free(arg);
+    
+    // FIXED: Set timeouts for client socket
+    set_socket_timeouts(client_sock, SOCKET_TIMEOUT, SOCKET_TIMEOUT);
     
     Message msg;
     
@@ -492,73 +499,6 @@ void* handle_client_request(void* arg) {
     return NULL;
 }
 
-void* handle_nm_communication(void* arg) {
-    (void)arg;
-    Message msg;
-    
-    while (ss.running) {
-        // Lock before receiving
-        pthread_mutex_lock(&nm_comm_mutex);
-        int recv_result = recv_message(ss.nm_sock, &msg);
-        pthread_mutex_unlock(&nm_comm_mutex);
-        
-        if (recv_result < 0) {
-            log_formatted(LOG_ERROR, "Lost connection to NM");
-            ss.running = 0;
-            break;
-        }
-        
-        Message response;
-        init_message(&response);
-        response.type = MSG_ACK;
-        response.ss_id = ss.id;
-        
-        log_formatted(LOG_REQUEST, "NM request: %d for file %s", msg.type, msg.filename);
-        
-        switch (msg.type) {
-            case MSG_CREATE:
-                response.status = create_file_ss(msg.filename);
-                break;
-                
-            case MSG_DELETE:
-                response.status = delete_file_ss(msg.filename);
-                break;
-                
-            case MSG_SS_INFO: {
-                FileMetadata meta;
-                if (strcmp(msg.data, "READ_CONTENT") == 0) {
-                    char buffer[MAX_BUFFER];
-                    response.status = read_file_ss(msg.filename, buffer);
-                    if (response.status == SUCCESS) {
-                        strncpy(response.data, buffer, MAX_BUFFER - 1);
-                    }
-                } else {
-                    response.status = get_file_info_ss(msg.filename, &meta);
-                    if (response.status == SUCCESS) {
-                        sprintf(response.data, "%zu|%d|%d|%ld|%ld", 
-                                meta.size, meta.word_count, meta.char_count, 
-                                meta.modified, meta.accessed);
-                    }
-                }
-                break;
-            }
-            
-            default:
-                response.status = ERR_INVALID_OPERATION;
-                break;
-        }
-        
-        // Lock before sending response
-        pthread_mutex_lock(&nm_comm_mutex);
-        send_message(ss.nm_sock, &response);
-        pthread_mutex_unlock(&nm_comm_mutex);
-        
-        log_formatted(LOG_RESPONSE, "Response to NM: %d", response.status);
-    }
-    
-    return NULL;
-}
-
 void* client_listener(void* arg) {
     (void)arg;
 
@@ -611,6 +551,86 @@ void* client_listener(void* arg) {
     return NULL;
 }
 
+void* handle_nm_communication(void* arg) {
+    (void)arg;
+    Message msg;
+    
+    while (ss.running) {
+        pthread_mutex_lock(&nm_comm_mutex);
+        int recv_result = recv_message(ss.nm_sock, &msg);
+        pthread_mutex_unlock(&nm_comm_mutex);
+        
+        if (recv_result < 0) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                // Timeout - this is normal, just continue
+                usleep(100000); // Sleep 100ms
+                continue;
+            }
+            log_formatted(LOG_ERROR, "Lost connection to NM, errno: %d", errno);
+            ss.running = 0;
+            break;
+        }
+        
+        // Skip heartbeat ACKs
+        if (msg.type == MSG_ACK && strcmp(msg.data, "HEARTBEAT_ACK") == 0) {
+            log_formatted(LOG_DEBUG, "Received heartbeat ACK from NM");
+            continue;
+        }
+        
+        Message response;
+        init_message(&response);
+        response.type = MSG_ACK;
+        response.ss_id = ss.id;
+        
+        log_formatted(LOG_REQUEST, "NM request: %d for file %s", msg.type, msg.filename);
+        
+        switch (msg.type) {
+            case MSG_CREATE:
+                response.status = create_file_ss(msg.filename);
+                break;
+                
+            case MSG_DELETE:
+                response.status = delete_file_ss(msg.filename);
+                break;
+                
+            case MSG_SS_INFO: {
+                FileMetadata meta;
+                if (strcmp(msg.data, "READ_CONTENT") == 0) {
+                    char buffer[MAX_BUFFER];
+                    response.status = read_file_ss(msg.filename, buffer);
+                    if (response.status == SUCCESS) {
+                        strncpy(response.data, buffer, MAX_BUFFER - 1);
+                    }
+                } else {
+                    response.status = get_file_info_ss(msg.filename, &meta);
+                    if (response.status == SUCCESS) {
+                        sprintf(response.data, "%zu|%d|%d|%ld|%ld", 
+                                meta.size, meta.word_count, meta.char_count, 
+                                meta.modified, meta.accessed);
+                    }
+                }
+                break;
+            }
+            
+            case MSG_ACK:
+                log_formatted(LOG_DEBUG, "Received ACK from NM");
+                continue;
+            
+            default:
+                response.status = ERR_INVALID_OPERATION;
+                break;
+        }
+        
+        pthread_mutex_lock(&nm_comm_mutex);
+        send_message(ss.nm_sock, &response);
+        pthread_mutex_unlock(&nm_comm_mutex);
+        
+        log_formatted(LOG_RESPONSE, "Response to NM: %d", response.status);
+    }
+    
+    return NULL;
+}
+
 void* heartbeat_thread(void* arg) {
     (void)arg;
     
@@ -622,29 +642,25 @@ void* heartbeat_thread(void* arg) {
     msg.ss_id = ss.id;
     strcpy(msg.data, "HEARTBEAT");
     
-    // Send initial heartbeat immediately
-    pthread_mutex_lock(&nm_comm_mutex);
-    send_message(ss.nm_sock, &msg);
-    pthread_mutex_unlock(&nm_comm_mutex);
-    log_formatted(LOG_DEBUG, "Initial heartbeat sent");
-    
     while (ss.running) {
-        log_formatted(LOG_DEBUG, "Heartbeat thread sleeping for %d seconds", HEARTBEAT_INTERVAL);
         sleep(HEARTBEAT_INTERVAL);
         
-        log_formatted(LOG_DEBUG, "Heartbeat thread woke up, sending heartbeat");
+        log_formatted(LOG_DEBUG, "Sending heartbeat to NM");
         
         pthread_mutex_lock(&nm_comm_mutex);
         int result = send_message(ss.nm_sock, &msg);
         pthread_mutex_unlock(&nm_comm_mutex);
         
         if (result < 0) {
-            log_formatted(LOG_ERROR, "Failed to send heartbeat, errno: %d", errno);
-            ss.running = 0;
-            break;
+            if (errno == EPIPE || errno == ECONNRESET) {
+                log_formatted(LOG_ERROR, "Connection lost to NM");
+                ss.running = 0;
+                break;
+            }
+            log_formatted(LOG_WARNING, "Failed to send heartbeat, errno: %d", errno);
+        } else {
+            log_formatted(LOG_DEBUG, "Heartbeat sent successfully");
         }
-        
-        log_formatted(LOG_DEBUG, "Heartbeat sent successfully to NM");
     }
     
     log_formatted(LOG_INFO, "Heartbeat thread exiting");
@@ -667,7 +683,6 @@ int main(int argc, char *argv[]) {
     
     pthread_t nm_thread, client_thread, hb_thread;
     
-    // Make sure all threads are created
     if (pthread_create(&nm_thread, NULL, handle_nm_communication, NULL) != 0) {
         log_formatted(LOG_ERROR, "Failed to create NM thread");
         return 1;
@@ -686,7 +701,6 @@ int main(int argc, char *argv[]) {
     printf("[SS %d] Storage Server running. Press Ctrl+C to stop.\n", ss.id);
     log_formatted(LOG_INFO, "All threads started successfully");
     
-    // Don't join immediately - let threads run
     pthread_join(nm_thread, NULL);
     pthread_join(client_thread, NULL);
     pthread_join(hb_thread, NULL);
