@@ -166,6 +166,10 @@ void handle_view(char *args) {
     
     if (args) {
         strncpy(msg.data, args, MAX_BUFFER - 1);
+        msg.data[MAX_BUFFER - 1] = '\0';
+    }
+    else {
+        msg.data[0] = '\0';
     }
     
     send_message(client.nm_sock, &msg);
@@ -602,17 +606,57 @@ void command_loop() {
         if (strlen(line) == 0) {
             continue;
         }
-        
-        // Parse command
-        char cmd[64], arg1[MAX_FILENAME], arg2[MAX_FILENAME], arg3[MAX_USERNAME];
-        int argc = sscanf(line, "%s %s %s %s", cmd, arg1, arg2, arg3);
-        
-        if (argc < 1) {
-            continue;
+
+        char* buf = line;
+        char** argv = NULL;
+        int argc_local = 0;
+        int cap = 0;
+        char* saveptr = NULL;
+        char* tok = strtok_r(buf, " \t", &saveptr);
+        while(tok)
+        {
+            if(argc_local + 1 >= cap)
+            {
+                int newcap = cap? cap * 2 : 8;
+                char** tmp = realloc(argv, newcap * sizeof(char*));
+                if(!tmp) { free(argv); argv=NULL; cap=0; break; }
+                argv = tmp;
+                cap = newcap;
+            }
+            argv[argc_local++] = tok;
+            tok = strtok_r(NULL, " \t", &saveptr);
         }
+
+        if(!argv) { continue; }
+        argv[argc_local] = NULL;
+        if(argc_local < 1) { free(argv); continue; }
+
+        char tail[MAX_BUFFER] = "";
+        if(argc_local > 1)
+        {
+            size_t off = 0;
+            for(int i = 1; i < argc_local; i++)
+            {
+                int n = snprintf(tail + off, sizeof(tail) - off, "%s%s", (i == 1) ? " " : "", argv[i]);
+                if(n<0) break;
+                off += (size_t)n;
+                if(off >= sizeof(tail)-1) break;
+            }
+        }
+
+        char* cmd = argv[0];
+        
+        // // Parse command
+        // char cmd[64], arg1[MAX_FILENAME], arg2[MAX_FILENAME], arg3[MAX_USERNAME];
+        // int argc = sscanf(line, "%s %s %s %s", cmd, arg1, arg2, arg3);
+        
+        // if (argc < 1) {
+        //     continue;
+        // }
         
         if (strcmp(cmd, "exit") == 0 || strcmp(cmd, "quit") == 0) {
             printf("Goodbye!\n");
+            free(argv);
             break;
         } else if (strcmp(cmd, "help") == 0) {
             printf("Available commands:\n");
@@ -630,68 +674,68 @@ void command_loop() {
             printf("  UNDO <filename>       - Undo last change\n");
             printf("  exit                  - Exit client\n");
         } else if (strcmp(cmd, "VIEW") == 0) {
-            handle_view(argc > 1 ? arg1 : NULL);
+            handle_view(argc_local > 1 ? tail : NULL);
         } else if (strcmp(cmd, "READ") == 0) {
-            if (argc < 2) {
+            if (argc_local < 2) {
                 printf("Usage: READ <filename>\n");
             } else {
-                handle_read(arg1);
+                handle_read(argv[1]);
             }
         } else if (strcmp(cmd, "CREATE") == 0) {
-            if (argc < 2) {
+            if (argc_local < 2) {
                 printf("Usage: CREATE <filename>\n");
             } else {
-                handle_create(arg1);
+                handle_create(argv[1]);
             }
         } else if (strcmp(cmd, "WRITE") == 0) {
-            if (argc < 3) {
+            if (argc_local < 3) {
                 printf("Usage: WRITE <filename> <sentence_index>\n");
             } else {
-                handle_write(arg1, arg2);
+                handle_write(argv[1], argv[2]);
             }
         } else if (strcmp(cmd, "DELETE") == 0) {
-            if (argc < 2) {
+            if (argc_local < 2) {
                 printf("Usage: DELETE <filename>\n");
             } else {
-                handle_delete(arg1);
+                handle_delete(argv[1]);
             }
         } else if (strcmp(cmd, "INFO") == 0) {
-            if (argc < 2) {
+            if (argc_local < 2) {
                 printf("Usage: INFO <filename>\n");
             } else {
-                handle_info(arg1);
+                handle_info(argv[1]);
             }
         } else if (strcmp(cmd, "STREAM") == 0) {
-            if (argc < 2) {
+            if (argc_local < 2) {
                 printf("Usage: STREAM <filename>\n");
             } else {
-                handle_stream(arg1);
+                handle_stream(argv[1]);
             }
         } else if (strcmp(cmd, "LIST") == 0) {
             handle_list();
         } else if (strcmp(cmd, "ADDACCESS") == 0) {
-            if (argc < 4) {
+            if (argc_local < 4) {
                 printf("Usage: ADDACCESS -R|-W <filename> <username>\n");
             } else {
-                handle_addaccess(arg1, arg2, arg3);
+                handle_addaccess(argv[1], argv[2], argv[3]);
             }
         } else if (strcmp(cmd, "REMACCESS") == 0) {
-            if (argc < 3) {
+            if (argc_local < 3) {
                 printf("Usage: REMACCESS <filename> <username>\n");
             } else {
-                handle_remaccess(arg1, arg2);
+                handle_remaccess(argv[1], argv[2]);
             }
         } else if (strcmp(cmd, "EXEC") == 0) {
-            if (argc < 2) {
+            if (argc_local < 2) {
                 printf("Usage: EXEC <filename>\n");
             } else {
-                handle_exec(arg1);
+                handle_exec(argv[1]);
             }
         } else if (strcmp(cmd, "UNDO") == 0) {
-            if (argc < 2) {
+            if (argc_local < 2) {
                 printf("Usage: UNDO <filename>\n");
             } else {
-                handle_undo(arg1);
+                handle_undo(argv[1]);
             }
         } else {
             printf("Unknown command: %s\n", cmd);

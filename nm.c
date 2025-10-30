@@ -2,6 +2,7 @@
 #include "logger.h"
 #include "trie.h"
 #include "cache.h"
+#include <ctype.h>
 
 #define NM_SS_PORT 8080
 #define NM_CLIENT_PORT 8081
@@ -127,8 +128,33 @@ int check_access(const char *filename, const char *username, AccessType required
 }
 
 void handle_view(int client_sock, Message *msg) {
-    int show_all = (strstr(msg->data, "-a") != NULL);
-    int show_details = (strstr(msg->data, "-l") != NULL);
+    int show_all = 0;
+    int show_details = 0;
+
+    /* Parse flags from msg->data: accept combined/repeated flags like -al, -laaa, -a -l, -all */
+
+    if (msg && msg->data && msg->data[0] != '\0') {
+        const char *s = msg->data;
+        while (*s) {
+            /* skip whitespace */
+            while (*s && isspace((unsigned char)*s)) s++;
+            if (*s == '\0') break;
+
+            if (*s == '-') {
+                /* parse flag token characters until whitespace */
+                s++;
+                while (*s && !isspace((unsigned char)*s)) {
+                    if (*s == 'a') show_all = 1;
+                    else if (*s == 'l') show_details = 1;
+                    /* ignore unknown flag chars */
+                    s++;
+                }
+            } else {
+                /* skip non-flag token */
+                while (*s && !isspace((unsigned char)*s)) s++;
+            }
+        }
+    }
     
     FileMetadata *files[MAX_FILES];
     int file_count = trie_get_all_files(nm.file_trie, files, MAX_FILES);
