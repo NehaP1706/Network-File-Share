@@ -7,7 +7,7 @@
 #define SENTENCE_CAPACITY 10
 #define SOCKET_TIMEOUT 10  
 
-static pthread_mutex_t nm_comm_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t nm_comm_mutex = PTHREAD_MUTEX_INITIALIZER; // Newly added to deal with heartbeats - N
 
 typedef struct {
     int id;
@@ -551,6 +551,7 @@ void* client_listener(void* arg) {
     return NULL;
 }
 
+// Heavily edited - N
 void* handle_nm_communication(void* arg) {
     (void)arg;
     Message msg;
@@ -571,7 +572,7 @@ void* handle_nm_communication(void* arg) {
             break;
         }
         
-        // Skip heartbeat ACKs
+        // Skip heartbeat ACKs, imp!! - N
         if (msg.type == MSG_ACK && strcmp(msg.data, "HEARTBEAT_ACK") == 0) {
             log_formatted(LOG_DEBUG, "Received heartbeat ACK from NM");
             continue;
@@ -621,6 +622,7 @@ void* handle_nm_communication(void* arg) {
                 break;
         }
         
+        // The lack of this critical section was mostly causing an issue.. - N
         pthread_mutex_lock(&nm_comm_mutex);
         send_message(ss.nm_sock, &response);
         pthread_mutex_unlock(&nm_comm_mutex);
@@ -631,6 +633,7 @@ void* handle_nm_communication(void* arg) {
     return NULL;
 }
 
+// Certain lockings introduced - N
 void* heartbeat_thread(void* arg) {
     (void)arg;
     
@@ -683,6 +686,7 @@ int main(int argc, char *argv[]) {
     
     pthread_t nm_thread, client_thread, hb_thread;
     
+    // Robust checking - N
     if (pthread_create(&nm_thread, NULL, handle_nm_communication, NULL) != 0) {
         log_formatted(LOG_ERROR, "Failed to create NM thread");
         return 1;

@@ -234,7 +234,9 @@ char* file_content_to_string(FileContent *fc) {
     return result;
 }
 
+// Heavily edited - N
 int insert_word_in_sentence(FileContent *fc, int sent_idx, int word_idx, const char *word) {
+    // Checking validity, might immediately return - N
     if (sent_idx < 0 || sent_idx >= fc->sentence_count) {
         log_formatted(LOG_ERROR, "Invalid sentence index: %d (file has %d sentences)", 
                      sent_idx, fc->sentence_count);
@@ -243,17 +245,17 @@ int insert_word_in_sentence(FileContent *fc, int sent_idx, int word_idx, const c
     
     Sentence *sent = &fc->sentences[sent_idx];
     
-    // word_idx is 1-based, validate directly
+    // word_idx is 1-based, validate directly - N
     if (word_idx < 1 || word_idx > sent->word_count + 1) {
         log_formatted(LOG_ERROR, "Invalid word index: %d (sentence has %d words, valid range: 1-%d)", 
                      word_idx, sent->word_count, sent->word_count + 1);
         return -1;
     }
     
-    // Convert to 0-based
+    // Convert to 0-based - N
     int actual_idx = word_idx - 1;
     
-    // Split word by delimiters
+    // Split word by delimiters - N
     int part_count;
     char **parts = split_by_delimiters(word, &part_count);
     
@@ -263,7 +265,7 @@ int insert_word_in_sentence(FileContent *fc, int sent_idx, int word_idx, const c
         return 0;
     }
     
-    // Count how many delimiters (new sentences) we're creating
+    // Count how many delimiters (new sentences) we're creating - N
     int new_sentences = 0;
     for (int i = 0; i < part_count; i++) {
         if (is_delimiter(parts[i][0])) {
@@ -274,7 +276,7 @@ int insert_word_in_sentence(FileContent *fc, int sent_idx, int word_idx, const c
     log_formatted(LOG_DEBUG, "Inserting %d parts, %d will create new sentences", 
                  part_count, new_sentences);
     
-    // Make room for new sentences if needed
+    // Make room for new sentences if needed - N
     if (new_sentences > 0) {
         int new_total = fc->sentence_count + new_sentences;
         if (new_total > fc->capacity) {
@@ -287,7 +289,7 @@ int insert_word_in_sentence(FileContent *fc, int sent_idx, int word_idx, const c
             fc->sentences[i + new_sentences] = fc->sentences[i];
         }
         
-        // Initialize new sentence slots
+        // Initialize new sentence slots - N
         for (int i = 1; i <= new_sentences; i++) {
             fc->sentences[sent_idx + i].capacity = 10;
             fc->sentences[sent_idx + i].word_count = 0;

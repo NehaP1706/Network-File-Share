@@ -41,11 +41,11 @@ void init_client() {
     // Initialize logger for client
     char instance_name[64];
     snprintf(instance_name, sizeof(instance_name), "Client_%s", client.username);
-    set_instance_name(instance_name);  // ADD THIS LINE
+    set_instance_name(instance_name);  // Added for better logging - N
     
     char log_file[128];
     snprintf(log_file, sizeof(log_file), "client_%s.log", client.username);
-    init_logger(log_file);  // ADD THIS LINE
+    init_logger(log_file);  // Starting logs here - N
     
     printf("[Client] Username: %s\n", client.username);
 }
@@ -76,7 +76,7 @@ void connect_to_nm() {
     if (getsockname(client.nm_sock, (struct sockaddr*)&local_addr, &addr_len) == 0) {
         inet_ntop(AF_INET, &local_addr.sin_addr, msg.data, INET_ADDRSTRLEN);
     } else {
-        // Fallback: use loopback if we can't get the actual IP
+        // Fallback: use loopback if we can't get the actual IP, continuously stuck here - N
         strcpy(msg.data, "127.0.0.1");
     }
     

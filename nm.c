@@ -16,7 +16,7 @@ typedef struct {
     StorageServerInfo ss_list[MAX_SS];
     int ss_count;
     pthread_mutex_t ss_mutex;
-    pthread_mutex_t ss_sock_mutexes[MAX_SS];  // ADD: One mutex per SS socket
+    pthread_mutex_t ss_sock_mutexes[MAX_SS];  // ADD: One mutex per SS socket - N
     int next_ss_id;
     
     ClientInfo client_list[MAX_CLIENTS];
@@ -58,7 +58,7 @@ void init_name_server() {
     pthread_mutex_init(&nm.ss_mutex, NULL);
     pthread_mutex_init(&nm.client_mutex, NULL);
     
-    // ADD: Initialize per-SS socket mutexes
+    // ADD: Initialize per-SS socket mutexes - N
     for (int i = 0; i < MAX_SS; i++) {
         pthread_mutex_init(&nm.ss_sock_mutexes[i], NULL);
     }
@@ -230,7 +230,7 @@ void handle_info(int client_sock, Message *msg) {
                 break;
             }
         }
-        pthread_mutex_unlock(&nm.ss_mutex);
+        pthread_mutex_unlock(&nm.ss_mutex); // Unlock early and use specific SS mutex instead - N
         
         if (ss_idx >= 0) {
             Message ss_req;
@@ -238,7 +238,7 @@ void handle_info(int client_sock, Message *msg) {
             ss_req.type = MSG_SS_INFO;
             strcpy(ss_req.filename, msg->filename);
             
-            // FIXED: Lock the specific SS socket
+            // FIXED: Lock the specific SS socket - N
             pthread_mutex_lock(&nm.ss_sock_mutexes[ss_idx]);
             send_message(nm.ss_list[ss_idx].sock, &ss_req);
             
@@ -341,7 +341,7 @@ void handle_create(int client_sock, Message *msg) {
             break;
         }
     }
-    pthread_mutex_unlock(&nm.ss_mutex);
+    pthread_mutex_unlock(&nm.ss_mutex); // Unlock early and use specific SS mutex instead - N
     
     if (ss_idx < 0) {
         response.status = ERR_SS_UNAVAILABLE;
@@ -354,7 +354,7 @@ void handle_create(int client_sock, Message *msg) {
     ss_msg.type = MSG_CREATE;
     strcpy(ss_msg.filename, msg->filename);
     
-    // FIXED: Lock the specific SS socket
+    // FIXED: Lock the specific SS socket - N
     pthread_mutex_lock(&nm.ss_sock_mutexes[ss_idx]);
     send_message(nm.ss_list[ss_idx].sock, &ss_msg);
     
@@ -419,7 +419,7 @@ void handle_delete(int client_sock, Message *msg) {
             break;
         }
     }
-    pthread_mutex_unlock(&nm.ss_mutex);
+    pthread_mutex_unlock(&nm.ss_mutex); // Unlock early and use specific SS mutex instead - N
     
     if (ss_idx < 0) {
         response.status = ERR_SS_UNAVAILABLE;
@@ -432,7 +432,7 @@ void handle_delete(int client_sock, Message *msg) {
     ss_msg.type = MSG_DELETE;
     strcpy(ss_msg.filename, msg->filename);
     
-    // FIXED: Lock the specific SS socket
+    // FIXED: Lock the specific SS socket - N
     pthread_mutex_lock(&nm.ss_sock_mutexes[ss_idx]);
     send_message(nm.ss_list[ss_idx].sock, &ss_msg);
     
@@ -547,7 +547,7 @@ void handle_exec(int client_sock, Message *msg) {
             break;
         }
     }
-    pthread_mutex_unlock(&nm.ss_mutex);
+    pthread_mutex_unlock(&nm.ss_mutex); // Unlock early and use specific SS mutex instead - N
     
     if (ss_idx < 0) {
         response.status = ERR_SS_UNAVAILABLE;
@@ -561,7 +561,7 @@ void handle_exec(int client_sock, Message *msg) {
     strcpy(ss_msg.filename, msg->filename);
     strcpy(ss_msg.data, "READ_CONTENT");
     
-    // FIXED: Lock the specific SS socket
+    // FIXED: Lock the specific SS socket - N
     pthread_mutex_lock(&nm.ss_sock_mutexes[ss_idx]);
     send_message(nm.ss_list[ss_idx].sock, &ss_msg);
     
@@ -671,7 +671,7 @@ void* handle_ss_connection(void* arg) {
         }
         pthread_mutex_unlock(&nm.ss_mutex);
         
-        // Don't send any response to heartbeats - this prevents the race condition
+        // Don't send any response to heartbeats - this prevents the race condition (?) - n
     }
     
     // Mark SS as inactive when connection is lost
