@@ -138,21 +138,26 @@ void handle_view(int client_sock, Message *msg) {
     int show_all = 0;
     int show_details = 0;
 
-    /* Parse flags from msg->data */
+    /* Parse flags from msg->data: accept combined/repeated flags like -al, -laaa, -a -l, -all */
+
     if (msg && msg->data && msg->data[0] != '\0') {
         const char *s = msg->data;
         while (*s) {
+            /* skip whitespace */
             while (*s && isspace((unsigned char)*s)) s++;
             if (*s == '\0') break;
 
             if (*s == '-') {
+                /* parse flag token characters until whitespace */
                 s++;
                 while (*s && !isspace((unsigned char)*s)) {
                     if (*s == 'a') show_all = 1;
                     else if (*s == 'l') show_details = 1;
+                    /* ignore unknown flag chars */
                     s++;
                 }
             } else {
+                /* skip non-flag token */
                 while (*s && !isspace((unsigned char)*s)) s++;
             }
         }
@@ -225,7 +230,7 @@ void handle_view(int client_sock, Message *msg) {
         if (has_access) {
             if (show_details) {
                 char time_str[32];
-                struct tm *tm_info = localtime(&files[i]->accessed);
+                struct tm *tm_info = localtime(&files[i]->accessed); //changed localtime_r to localtime - S
                 strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", tm_info);
                 
                 pos += sprintf(buffer + pos, "%-20s %-8d %-8d %-20s %-10s\n",
