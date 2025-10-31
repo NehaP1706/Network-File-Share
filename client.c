@@ -170,6 +170,7 @@ void handle_view(char *args) {
         strncpy(msg.data, args, MAX_BUFFER - 1);
     }
     
+    printf("[DEBUG] Sending VIEW request with args: %s\n", args ? args : "None");
     send_message(client.nm_sock, &msg);
     
     Message response;

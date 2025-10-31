@@ -178,11 +178,10 @@ int parse_file(const char *filepath, FileContent *fc) {
         fc->sentence_count--;
     }
 
-    
     if(fc->sentences[current_sent].word_count > 0) {
         fc->sentence_count = current_sent + 1;
     } //FOR WHEN FILE HAS NO DELIMITERS BUT WORDS, WE STILL COUNT IT AS ONE SENTENCE -S
-
+    
     fclose(file);
     return 0;
 }
@@ -359,25 +358,47 @@ void get_file_stats(const char *filepath, int *word_count, int *char_count) {
     *char_count = 0;
     
     FILE *file = fopen(filepath, "r");
-    if (!file) return;
+    if (!file) {
+        log_formatted(LOG_ERROR, "Cannot open file for stats: %s", filepath);
+        return;
+    }
     
     int in_word = 0;
     int c;
     
     while ((c = fgetc(file)) != EOF) {
-        (*char_count)++;
+        // Count non-whitespace, non-delimiter characters for char_count
+        if (c != ' ' && c != '\t' && c != '\n' && c != '\r' && !is_delimiter(c)) {
+            (*char_count)++;
+        }
         
+        // Count words (sequences of non-whitespace characters)
         if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
-            in_word = 0;
-        } else {
-            if (!in_word) {
+            if (in_word) {
                 (*word_count)++;
-                in_word = 1;
+                in_word = 0;
             }
+        } else if (is_delimiter(c)) {
+            // Delimiters count as separate words
+            if (in_word) {
+                (*word_count)++;
+                in_word = 0;
+            }
+            (*word_count)++;  // The delimiter itself is a word
+        } else {
+            in_word = 1;
         }
     }
     
+    // Handle last word if file doesn't end with whitespace
+    if (in_word) {
+        (*word_count)++;
+    }
+    
     fclose(file);
+    
+    log_formatted(LOG_DEBUG, "File stats for %s: %d words, %d chars", 
+                 filepath, *word_count, *char_count);
 }
 
 int create_undo_backup(const char *filepath) {

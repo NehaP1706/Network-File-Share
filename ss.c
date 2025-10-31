@@ -83,7 +83,7 @@ void connect_to_nm(const char *nm_ip, int nm_port) {
     }
     
     // FIXED: Set socket timeouts
-    set_socket_timeouts(ss.nm_sock, SOCKET_TIMEOUT, SOCKET_TIMEOUT);
+    // set_socket_timeouts(ss.nm_sock, SOCKET_TIMEOUT, SOCKET_TIMEOUT);
     
     struct sockaddr_in nm_addr;
     nm_addr.sin_family = AF_INET;
@@ -266,7 +266,7 @@ int write_file_ss(const char *filename, int sent_idx, int word_idx, const char *
         fc->sentences[0].word_count = 0;
         fc->sentences[0].words = malloc(sizeof(char*) * fc->sentences[0].capacity);
     }
-    
+
     // printf("File has %d sentences before insertion\n", fc->sentence_count);
     if (fc->sentence_count == 0) {
         log_formatted(LOG_DEBUG, "File is empty, initializing with one sentence");
@@ -400,12 +400,15 @@ int get_file_info_ss(const char *filename, FileMetadata *meta) {
     char filepath[MAX_PATH];
     snprintf(filepath, sizeof(filepath), "%s/%s", ss.storage_path, filename);
     
+    log_formatted(LOG_DEBUG, "Getting file info for: %s", filepath);
+    
     struct stat st;
     if (stat(filepath, &st) != 0) {
+        log_formatted(LOG_ERROR, "File not found: %s (errno: %d)", filepath, errno);
         return ERR_FILE_NOT_FOUND;
     }
     
-    int word_count, char_count;
+    int word_count = 0, char_count = 0;
     get_file_stats(filepath, &word_count, &char_count);
     
     meta->size = st.st_size;
@@ -413,6 +416,9 @@ int get_file_info_ss(const char *filename, FileMetadata *meta) {
     meta->char_count = char_count;
     meta->modified = st.st_mtime;
     meta->accessed = st.st_atime;
+    
+    log_formatted(LOG_INFO, "File info for %s: size=%zu, words=%d, chars=%d", 
+                 filename, meta->size, meta->word_count, meta->char_count);
     
     return SUCCESS;
 }
@@ -558,9 +564,9 @@ void* handle_nm_communication(void* arg) {
     Message msg;
     
     while (ss.running) {
-        pthread_mutex_lock(&nm_comm_mutex);
+        //pthread_mutex_lock(&nm_comm_mutex);
         int recv_result = recv_message(ss.nm_sock, &msg);
-        pthread_mutex_unlock(&nm_comm_mutex);
+        //pthread_mutex_unlock(&nm_comm_mutex);
         
         if (recv_result < 0) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
@@ -597,23 +603,35 @@ void* handle_nm_communication(void* arg) {
                 
             case MSG_SS_INFO: {
                 FileMetadata meta;
+                memset(&meta, 0, sizeof(FileMetadata));  // ADDED: Initialize
+                
                 if (strcmp(msg.data, "READ_CONTENT") == 0) {
                     char buffer[MAX_BUFFER];
                     response.status = read_file_ss(msg.filename, buffer);
                     if (response.status == SUCCESS) {
                         strncpy(response.data, buffer, MAX_BUFFER - 1);
+                        log_formatted(LOG_DEBUG, "Returning file content (%zu bytes)", strlen(buffer));
                     }
                 } else {
+                    // FIXED: Get file statistics and format response
                     response.status = get_file_info_ss(msg.filename, &meta);
                     if (response.status == SUCCESS) {
-                        sprintf(response.data, "%zu|%d|%d|%ld|%ld", 
+                        // Changed delimiting to ; to avoid conflict - N
+                        sprintf(response.data, "%zu;%d;%d;%ld;%ld", 
                                 meta.size, meta.word_count, meta.char_count, 
-                                meta.modified, meta.accessed);
+                                meta.modified, meta.accessed);                                                                                                                                   
+                        
+                        // ADDED: Log what we're sending
+                        log_formatted(LOG_INFO, "Sending metadata: size=%zu, words=%d, chars=%d, data='%s'", 
+                                     meta.size, meta.word_count, meta.char_count, response.data);                   
+                    } else {
+                        log_formatted(LOG_ERROR, "Failed to get file info for %s, status=%d", 
+                                     msg.filename, response.status);
                     }
                 }
                 break;
             }
-            
+
             case MSG_ACK:
                 log_formatted(LOG_DEBUG, "Received ACK from NM");
                 continue;

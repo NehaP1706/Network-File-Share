@@ -138,26 +138,21 @@ void handle_view(int client_sock, Message *msg) {
     int show_all = 0;
     int show_details = 0;
 
-    /* Parse flags from msg->data: accept combined/repeated flags like -al, -laaa, -a -l, -all */
-
+    /* Parse flags from msg->data */
     if (msg && msg->data && msg->data[0] != '\0') {
         const char *s = msg->data;
         while (*s) {
-            /* skip whitespace */
             while (*s && isspace((unsigned char)*s)) s++;
             if (*s == '\0') break;
 
             if (*s == '-') {
-                /* parse flag token characters until whitespace */
                 s++;
                 while (*s && !isspace((unsigned char)*s)) {
                     if (*s == 'a') show_all = 1;
                     else if (*s == 'l') show_details = 1;
-                    /* ignore unknown flag chars */
                     s++;
                 }
             } else {
-                /* skip non-flag token */
                 while (*s && !isspace((unsigned char)*s)) s++;
             }
         }
@@ -165,6 +160,49 @@ void handle_view(int client_sock, Message *msg) {
     
     FileMetadata *files[MAX_FILES];
     int file_count = trie_get_all_files(nm.file_trie, files, MAX_FILES);
+    
+    // Fetch metadata for files if needed - N
+    if (show_details) {
+        for (int i = 0; i < file_count; i++) {
+            int ss_id = files[i]->ss_id;
+            
+            pthread_mutex_lock(&nm.ss_mutex);
+            int ss_idx = -1;
+            for (int j = 0; j < nm.ss_count; j++) {
+                if (nm.ss_list[j].id == ss_id && nm.ss_list[j].active) {
+                    ss_idx = j;
+                    break;
+                }
+            }
+            pthread_mutex_unlock(&nm.ss_mutex);
+            
+            if (ss_idx >= 0) {
+                Message ss_req;
+                init_message(&ss_req);
+                ss_req.type = MSG_SS_INFO;
+                strcpy(ss_req.filename, files[i]->filename);
+                
+                pthread_mutex_lock(&nm.ss_sock_mutexes[ss_idx]);
+                send_message(nm.ss_list[ss_idx].sock, &ss_req);
+                
+                Message ss_resp;
+                if (recv_message(nm.ss_list[ss_idx].sock, &ss_resp) == 0 && 
+                    ss_resp.status == SUCCESS) {
+                    printf("Reached here! with %s\n", ss_resp.data);
+                    // Changed delimiting to ; to avoid conflict - N
+                    // Parse and update metadata
+                    sscanf(ss_resp.data, "%zu;%d;%d;%ld;%ld",
+                           &files[i]->size, &files[i]->word_count, &files[i]->char_count,
+                           &files[i]->modified, &files[i]->accessed);
+                    
+                    // Update in trie and cache
+                    trie_update(nm.file_trie, files[i]->filename, files[i]);
+                    cache_put(nm.cache, files[i]->filename, files[i]);
+                }
+                pthread_mutex_unlock(&nm.ss_sock_mutexes[ss_idx]);
+            }
+        }
+    }
     
     Message response;
     init_message(&response);
@@ -187,7 +225,7 @@ void handle_view(int client_sock, Message *msg) {
         if (has_access) {
             if (show_details) {
                 char time_str[32];
-                struct tm *tm_info = localtime(&files[i]->accessed); //changed localtime_r to localtime - S
+                struct tm *tm_info = localtime(&files[i]->accessed);
                 strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", tm_info);
                 
                 pos += sprintf(buffer + pos, "%-20s %-8d %-8d %-20s %-10s\n",
