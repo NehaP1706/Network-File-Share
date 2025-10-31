@@ -77,6 +77,7 @@ void connect_to_nm() {
         inet_ntop(AF_INET, &local_addr.sin_addr, msg.data, INET_ADDRSTRLEN);
     } else {
         // Fallback: use loopback if we can't get the actual IP, continuously stuck here - N
+        printf("[DEBUG] getsockname failed, using loopback address\n");
         strcpy(msg.data, "127.0.0.1");
     }
     
@@ -138,6 +139,7 @@ int connect_to_ss(const char *ss_info) {
     char ip[INET_ADDRSTRLEN];
     int port;
     
+    printf("[DEBUG] Connecting to SS with info: %s\n", ss_info); // Debug line
     sscanf(ss_info, "%[^:]:%d", ip, &port);
     
     int ss_sock = socket(AF_INET, SOCK_STREAM, 0);

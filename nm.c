@@ -4,6 +4,7 @@
 #include "trie.h"
 #include "cache.h"
 #include <ctype.h>
+#include <sys/time.h>
 
 #define NM_SS_PORT 8080
 #define NM_CLIENT_PORT 8081

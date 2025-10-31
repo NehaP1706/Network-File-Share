@@ -1,6 +1,10 @@
 #include "common.h"
 #include "logger.h"
 #include "file_ops.h"
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <ifaddrs.h>
 
 #define SS_STORAGE_DIR "./ss_storage"
 #define HEARTBEAT_INTERVAL 5
@@ -47,8 +51,53 @@ void init_file_locks(const char *filename, int sentence_count);
 int lock_sentence_ss(const char *filename, int sent_idx, const char *username);
 int unlock_sentence_ss(const char *filename, int sent_idx, const char *username);
 
+int get_system_ip(char *ip_buffer, size_t buffer_size) {
+    struct ifaddrs *ifaddr, *ifa;
+    int found = 0;
+    
+    if (getifaddrs(&ifaddr) == -1) {
+        perror("getifaddrs");
+        return -1;
+    }
+    
+    // Iterate through the network interfaces
+    for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
+        if (ifa->ifa_addr == NULL)
+            continue;
+        
+        // Check for IPv4 address
+        if (ifa->ifa_addr->sa_family == AF_INET) {
+            struct sockaddr_in *addr = (struct sockaddr_in *)ifa->ifa_addr;
+            char *ip = inet_ntoa(addr->sin_addr);
+            
+            // Skip loopback interface (127.0.0.1)
+            if (strcmp(ip, "127.0.0.1") != 0) {
+                strncpy(ip_buffer, ip, buffer_size - 1);
+                ip_buffer[buffer_size - 1] = '\0';
+                found = 1;
+                break;
+            }
+        }
+    }
+    
+    freeifaddrs(ifaddr);
+    
+    if (!found) {
+        // Fallback to loopback if no other interface found
+        strncpy(ip_buffer, "127.0.0.1", buffer_size - 1);
+        ip_buffer[buffer_size - 1] = '\0';
+        return -1;
+    }
+    
+    return 0;
+}
+
 void init_storage_server(const char *nm_ip, int nm_port, int client_port) {
-    strcpy(ss.ip, "127.0.0.1");
+    
+    if (get_system_ip(ss.ip, sizeof(ss.ip)) != 0) {
+        fprintf(stderr, "[SS] Warning: Could not determine system IP, using loopback\n");
+    }
+
     ss.nm_port = nm_port;
     ss.client_port = client_port;
     ss.id = getpid();
