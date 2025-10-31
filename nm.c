@@ -611,6 +611,8 @@ void handle_exec(int client_sock, Message *msg) {
     Message ss_response;
     recv_message(nm.ss_list[ss_idx].sock, &ss_response);
     pthread_mutex_unlock(&nm.ss_sock_mutexes[ss_idx]);
+
+    printf("SS Response Dtaa: %s\n", ss_response.data); // Debug line
     
     if (ss_response.status != SUCCESS) {
         response.status = ss_response.status;
@@ -689,6 +691,7 @@ void* handle_ss_connection(void* arg) {
     }
     free(file_list);
     
+    int my_ss_id = msg.ss_id;  // Save SS ID for later use
     nm.ss_count++;
     pthread_mutex_unlock(&nm.ss_mutex);
     
@@ -696,33 +699,48 @@ void* handle_ss_connection(void* arg) {
                  msg.ss_id, nm.ss_list[idx].file_count);
     printf("[NM] Storage Server %d connected from %s\n", msg.ss_id, msg.sender);
     
-    // Handle ongoing communication (mainly heartbeats)
+    // FIXED: Listen for heartbeats only - don't use ss_sock_mutexes here
+    // The mutex is only for command-response, not for heartbeat listening
     while (nm.running) {
-        if (recv_message(ss_sock, &msg) < 0) {
-            log_formatted(LOG_WARNING, "SS %d disconnected", msg.ss_id);
+        // Set a reasonable timeout for heartbeat receive
+        struct timeval tv;
+        tv.tv_sec = HEARTBEAT_TIMEOUT;
+        tv.tv_usec = 0;
+        setsockopt(ss_sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+        
+        int result = recv_message(ss_sock, &msg);
+        
+        if (result < 0) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                // Timeout - SS hasn't sent heartbeat
+                log_formatted(LOG_WARNING, "SS %d heartbeat timeout", my_ss_id);
+            } else {
+                // Connection lost
+                log_formatted(LOG_WARNING, "SS %d disconnected (errno: %d)", my_ss_id, errno);
+            }
             break;
         }
         
-        // Update last heartbeat time
+        // Update last heartbeat time for any message received
         pthread_mutex_lock(&nm.ss_mutex);
         for (int i = 0; i < nm.ss_count; i++) {
-            if (nm.ss_list[i].id == msg.ss_id) {
+            if (nm.ss_list[i].id == my_ss_id) {
                 nm.ss_list[i].last_heartbeat = time(NULL);
-                log_formatted(LOG_DEBUG, "Received heartbeat from SS %d", msg.ss_id);
+                if (msg.type == MSG_ACK && strcmp(msg.data, "HEARTBEAT") == 0) {
+                    log_formatted(LOG_DEBUG, "Received heartbeat from SS %d", my_ss_id);
+                }
                 break;
             }
         }
         pthread_mutex_unlock(&nm.ss_mutex);
-        
-        // Don't send any response to heartbeats - this prevents the race condition (?) - n
     }
     
     // Mark SS as inactive when connection is lost
     pthread_mutex_lock(&nm.ss_mutex);
     for (int i = 0; i < nm.ss_count; i++) {
-        if (nm.ss_list[i].id == msg.ss_id) {
+        if (nm.ss_list[i].id == my_ss_id) {
             nm.ss_list[i].active = 0;
-            log_formatted(LOG_INFO, "Marked SS %d as inactive", msg.ss_id);
+            log_formatted(LOG_INFO, "Marked SS %d as inactive", my_ss_id);
             break;
         }
     }
