@@ -177,7 +177,12 @@ int parse_file(const char *filepath, FileContent *fc) {
         free(fc->sentences[fc->sentence_count - 1].words);
         fc->sentence_count--;
     }
+
     
+    if(fc->sentences[current_sent].word_count > 0) {
+        fc->sentence_count = current_sent + 1;
+    } //FOR WHEN FILE HAS NO DELIMITERS BUT WORDS, WE STILL COUNT IT AS ONE SENTENCE -S
+
     fclose(file);
     return 0;
 }

@@ -267,6 +267,7 @@ int write_file_ss(const char *filename, int sent_idx, int word_idx, const char *
         fc->sentences[0].words = malloc(sizeof(char*) * fc->sentences[0].capacity);
     }
     
+    // printf("File has %d sentences before insertion\n", fc->sentence_count);
     if (fc->sentence_count == 0) {
         log_formatted(LOG_DEBUG, "File is empty, initializing with one sentence");
         fc->sentence_count = 1;
