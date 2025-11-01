@@ -371,7 +371,7 @@ int write_file_ss(const char *filename, int sent_idx, int word_idx, const char *
     
     log_formatted(LOG_DEBUG, "File has %d sentences before insertion", fc->sentence_count);
     
-    if (sent_idx < 0 || sent_idx >= fc->sentence_count) {
+    if (sent_idx < 0 || sent_idx > fc->sentence_count) { // Changed >= to > - S
         log_formatted(LOG_ERROR, "Invalid sentence index: %d (file has %d sentences)", 
                      sent_idx, fc->sentence_count);
         free_file_content(fc);
@@ -470,8 +470,31 @@ int stream_file_ss(int client_sock, const char *filename) {
     msg.status = SUCCESS;
     
     for (int i = 0; i < fc->sentence_count; i++) {
-        for (int j = 0; j < fc->sentences[i].word_count; j++) {
-            strncpy(msg.data, fc->sentences[i].words[j], MAX_BUFFER - 1);
+        int wc = fc->sentences[i].word_count;
+        for (int j = 0; j < wc; j++) {
+            const char *curr = fc->sentences[i].words[j];
+            const char *next = (j + 1 < wc) ? fc->sentences[i].words[j + 1] : NULL;
+
+            /* Determine whether the server wants the client to print a trailing space.
+               Rules:
+                - If there is a next token in the same sentence, print a space only when
+                  both current and next tokens are non-delimiters (normal word-word spacing).
+                - If this is the last token of the sentence and there are more sentences,
+                  request a trailing space (space between sentences).
+                - Otherwise (delimiter before next word in same sentence, or last token of last sentence),
+                  do not request a trailing space. - S */
+            int needs_space = 0;
+            if (next) {
+                if (!is_delimiter(curr[0]) && !is_delimiter(next[0])) needs_space = 1;
+            } else {
+                if (i < fc->sentence_count - 1) needs_space = 1;
+            }
+
+            strncpy(msg.data, curr, MAX_BUFFER - 1);
+            msg.data[MAX_BUFFER - 1] = '\0';
+            msg.status = needs_space ? 1 : 0;
+            msg.sentence_index = i;
+            msg.word_index = j;
             
             if (send_message(client_sock, &msg) < 0) {
                 free_file_content(fc);
@@ -483,6 +506,7 @@ int stream_file_ss(int client_sock, const char *filename) {
     }
     
     msg.type = MSG_STOP;
+    msg.status = SUCCESS;
     send_message(client_sock, &msg);
     
     free_file_content(fc);

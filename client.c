@@ -405,61 +405,109 @@ void handle_info(char *filename) {
     }
 }
 
+// void handle_stream(char *filename) {
+//     Message msg;
+//     init_message(&msg);
+//     msg.type = MSG_STREAM;
+//     strcpy(msg.sender, client.username);
+//     strcpy(msg.filename, filename);
+    
+//     send_message(client.nm_sock, &msg);
+    
+//     Message response;
+//     recv_message(client.nm_sock, &response);
+    
+//     if (response.status != SUCCESS) {
+//         print_error(response.status);
+//         return;
+//     }
+    
+//     // Connect to SS
+//     int ss_sock = connect_to_ss(response.data);
+//     if (ss_sock < 0) {
+//         printf("Error: Could not connect to storage server\n");
+//         return;
+//     }
+    
+//     // Send stream request
+//     init_message(&msg);
+//     msg.type = MSG_STREAM;
+//     strcpy(msg.filename, filename);
+//     strcpy(msg.sender, client.username);
+    
+//     send_message(ss_sock, &msg);
+//     recv_message(ss_sock, &response);
+    
+//     if (response.status != SUCCESS) {
+//         print_error(response.status);
+//         close(ss_sock);
+//         return;
+//     }
+    
+//     // Receive and display words
+//     while (1) {
+//         if (recv_message(ss_sock, &response) < 0) {
+//             printf("\nError: Connection to storage server lost\n");
+//             break;
+//         }
+        
+//         if (response.type == MSG_STOP) {
+//             printf("\n");
+//             break;
+//         }
+        
+//         printf("%s ", response.data);
+//         fflush(stdout);
+//     }
+    
+//     close(ss_sock);
+// }
+
 void handle_stream(char *filename) {
-    Message msg;
-    init_message(&msg);
-    msg.type = MSG_STREAM;
-    strcpy(msg.sender, client.username);
-    strcpy(msg.filename, filename);
-    
-    send_message(client.nm_sock, &msg);
-    
-    Message response;
-    recv_message(client.nm_sock, &response);
-    
-    if (response.status != SUCCESS) {
-        print_error(response.status);
-        return;
-    }
-    
-    // Connect to SS
-    int ss_sock = connect_to_ss(response.data);
+    int ss_sock = connect_to_ss(filename /* note: connect_to_ss expects "ip:port"; adjust call if you instead get ss_info elsewhere */);
     if (ss_sock < 0) {
-        printf("Error: Could not connect to storage server\n");
+        printf("Failed to connect to storage server for streaming\n");
         return;
     }
-    
-    // Send stream request
-    init_message(&msg);
-    msg.type = MSG_STREAM;
-    strcpy(msg.filename, filename);
-    strcpy(msg.sender, client.username);
-    
-    send_message(ss_sock, &msg);
-    recv_message(ss_sock, &response);
-    
-    if (response.status != SUCCESS) {
-        print_error(response.status);
+
+    Message req;
+    init_message(&req);
+    req.type = MSG_STREAM;
+    strcpy(req.sender, client.username);
+    strncpy(req.filename, filename, MAX_FILENAME - 1);
+    req.filename[MAX_FILENAME - 1] = '\0';
+
+    if (send_message(ss_sock, &req) < 0) {
+        printf("Failed to request stream\n");
         close(ss_sock);
         return;
     }
-    
-    // Receive and display words
+
+    /* Receive stream tokens until MSG_STOP */
+    Message resp;
     while (1) {
-        if (recv_message(ss_sock, &response) < 0) {
-            printf("\nError: Connection to storage server lost\n");
+        if (recv_message(ss_sock, &resp) < 0) {
+            printf("Stream interrupted\n");
             break;
         }
-        
-        if (response.type == MSG_STOP) {
-            printf("\n");
+        if (resp.type == MSG_STOP) {
             break;
         }
-        
-        printf("%s ", response.data);
+        if (resp.type != MSG_DATA) {
+            continue;
+        }
+
+        /* Print token */
+        printf("%s", resp.data);
+
+        /* Print trailing space only when server asked for it (resp.status == 1) */
+        if (resp.status == 1) {
+            printf(" ");
+        }
         fflush(stdout);
     }
-    
+
+    printf("\n");
     close(ss_sock);
 }
 
