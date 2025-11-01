@@ -6,8 +6,8 @@
 #include <ctype.h>
 #include <sys/time.h>
 
-#define NM_SS_PORT 8080
-#define NM_CLIENT_PORT 8081
+// #define NM_SS_PORT 8080
+// #define NM_CLIENT_PORT 8081
 #define HEARTBEAT_TIMEOUT 15
 
 typedef struct {
@@ -25,6 +25,7 @@ typedef struct {
     pthread_mutex_t client_mutex;
     
     int ss_sock;
+    int ss_hb_sock;            // NEW - heartbeat listener
     int client_sock;
     volatile int running;
 } NameServer;
@@ -48,6 +49,10 @@ void handle_access(int client_sock, Message *msg);
 void handle_exec(int client_sock, Message *msg);
 int check_access(const char *filename, const char *username, AccessType required);
 
+// Added new function declarations for heartbeat handling - N
+void* ss_hb_listener(void* arg);
+void* handle_ss_heartbeat(void* arg);
+
 void init_name_server() {
     nm.file_trie = init_trie();
     nm.cache = init_cache(CACHE_SIZE);
@@ -62,6 +67,7 @@ void init_name_server() {
     // ADD: Initialize per-SS socket mutexes - N
     for (int i = 0; i < MAX_SS; i++) {
         pthread_mutex_init(&nm.ss_sock_mutexes[i], NULL);
+        nm.ss_list[i].hb_sock = -1;  // FIX: Initialize all to -1
     }
     
     set_instance_name("NM");
@@ -197,9 +203,9 @@ void handle_view(int client_sock, Message *msg) {
                     printf("Reached here! with %s\n", ss_resp.data);
                     // Changed delimiting to ; to avoid conflict - N
                     // Parse and update metadata
-                    sscanf(ss_resp.data, "%zu;%d;%d;%ld;%ld",
-                           &files[i]->size, &files[i]->word_count, &files[i]->char_count,
-                           &files[i]->modified, &files[i]->accessed);
+                    sscanf(ss_resp.data, "%zu|%d|%d|%ld|%ld",
+                        &files[i]->size, &files[i]->word_count, &files[i]->char_count,
+                        &files[i]->modified, &files[i]->accessed);
                     
                     // Update in trie and cache
                     trie_update(nm.file_trie, files[i]->filename, files[i]);
@@ -641,6 +647,102 @@ void handle_exec(int client_sock, Message *msg) {
     log_formatted(LOG_INFO, "Executed file %s for %s", msg->filename, msg->sender);
 }
 
+void* ss_hb_listener(void* arg) {
+    (void) arg;
+
+    nm.ss_hb_sock = socket(AF_INET, SOCK_STREAM, 0);
+    int opt = 1;
+    setsockopt(nm.ss_hb_sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    
+    struct sockaddr_in addr;
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = INADDR_ANY;
+    addr.sin_port = htons(NM_SS_HB_PORT);
+    
+    bind(nm.ss_hb_sock, (struct sockaddr*)&addr, sizeof(addr));
+    listen(nm.ss_hb_sock, MAX_SS);
+    
+    printf("[NM] Listening for SS heartbeats on port %d\n", NM_SS_HB_PORT);
+    
+    while (nm.running) {
+        int *hb_sock = malloc(sizeof(int));
+        *hb_sock = accept(nm.ss_hb_sock, NULL, NULL);
+        
+        if (*hb_sock < 0) {
+            free(hb_sock);
+            continue;
+        }
+        
+        pthread_t tid;
+        pthread_create(&tid, NULL, handle_ss_heartbeat, hb_sock);
+        pthread_detach(tid);
+    }
+    
+    return NULL;
+}
+
+// NEW: Add heartbeat handler
+void* handle_ss_heartbeat(void* arg) {
+    int hb_sock = *((int*)arg);
+    free(arg);
+    
+    Message msg;
+    
+    // First message identifies the SS
+    if (recv_message(hb_sock, &msg) < 0 || msg.type != MSG_ACK) {
+        close(hb_sock);
+        return NULL;
+    }
+    
+    int my_ss_id = msg.ss_id;
+    log_formatted(LOG_INFO, "SS %d heartbeat connection established", my_ss_id);
+
+    pthread_mutex_lock(&nm.ss_mutex);
+    for (int i = 0; i < nm.ss_count; i++) {
+        if (nm.ss_list[i].id == my_ss_id) {
+            nm.ss_list[i].hb_sock = hb_sock;
+            nm.ss_list[i].last_heartbeat = time(NULL);
+            break;
+        }
+    }
+    pthread_mutex_unlock(&nm.ss_mutex);
+    
+    // Receive heartbeats
+    while (nm.running) {
+        if (recv_message(hb_sock, &msg) < 0) {
+            log_formatted(LOG_WARNING, "SS %d heartbeat connection lost", my_ss_id);
+            break;
+        }
+        
+        if (msg.type == MSG_ACK && strcmp(msg.data, "HEARTBEAT") == 0) {
+            pthread_mutex_lock(&nm.ss_mutex);
+            for (int i = 0; i < nm.ss_count; i++) {
+                if (nm.ss_list[i].id == my_ss_id) {
+                    nm.ss_list[i].last_heartbeat = time(NULL);
+                    log_formatted(LOG_DEBUG, "Heartbeat from SS %d", my_ss_id);
+                    break;
+                }
+            }
+            pthread_mutex_unlock(&nm.ss_mutex);
+        }
+    }
+
+    // Heartbeat lost - mark as inactive
+    pthread_mutex_lock(&nm.ss_mutex);
+    for (int i = 0; i < nm.ss_count; i++) {
+        if (nm.ss_list[i].id == my_ss_id) {
+            nm.ss_list[i].hb_sock = -1;
+            nm.ss_list[i].active = 0;  // THIS triggers cleanup in handle_ss_connection
+            log_formatted(LOG_ERROR, "SS %d marked INACTIVE due to heartbeat failure", my_ss_id);
+            break;
+        }
+    }
+    pthread_mutex_unlock(&nm.ss_mutex);
+    
+    close(hb_sock);
+    return NULL;
+}
+
 void* handle_ss_connection(void* arg) {
     int ss_sock = *((int*)arg);
     free(arg);
@@ -662,9 +764,12 @@ void* handle_ss_connection(void* arg) {
     int idx = nm.ss_count;
     nm.ss_list[idx].id = msg.ss_id;
     strcpy(nm.ss_list[idx].ip, msg.sender);
-    nm.ss_list[idx].nm_port = msg.word_index;
-    nm.ss_list[idx].client_port = msg.sentence_index;
+    nm.ss_list[idx].nm_port = msg.nm_port;
+    nm.ss_list[idx].client_port = msg.client_port;  // FIX: Use proper field
+    printf("[NM] Registered SS ID: %d, IP: %s, NM Port: %d, Client Port: %d\n", 
+           msg.ss_id, msg.sender, msg.nm_port, msg.client_port);
     nm.ss_list[idx].sock = ss_sock;
+    nm.ss_list[idx].hb_sock = -1;  // FIX: Initialize, will be set later
     nm.ss_list[idx].active = 1;
     nm.ss_list[idx].last_heartbeat = time(NULL);
     nm.ss_list[idx].file_count = 0;
@@ -692,7 +797,7 @@ void* handle_ss_connection(void* arg) {
     }
     free(file_list);
     
-    int my_ss_id = msg.ss_id;  // Save SS ID for later use
+    int my_ss_id = msg.ss_id;
     nm.ss_count++;
     pthread_mutex_unlock(&nm.ss_mutex);
     
@@ -700,54 +805,28 @@ void* handle_ss_connection(void* arg) {
                  msg.ss_id, nm.ss_list[idx].file_count);
     printf("[NM] Storage Server %d connected from %s\n", msg.ss_id, msg.sender);
     
-    // FIXED: Listen for heartbeats only - don't use ss_sock_mutexes here
-    // The mutex is only for command-response, not for heartbeat listening
-    while (nm.running) {
-        // Set a reasonable timeout for heartbeat receive
-        struct timeval tv;
-        tv.tv_sec = HEARTBEAT_TIMEOUT;
-        tv.tv_usec = 0;
-        setsockopt(ss_sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-        
-        int result = recv_message(ss_sock, &msg);
-        
-        if (result < 0) {
-            if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                // Timeout - SS hasn't sent heartbeat
-                log_formatted(LOG_WARNING, "SS %d heartbeat timeout", my_ss_id);
-            } else {
-                // Connection lost
-                log_formatted(LOG_WARNING, "SS %d disconnected (errno: %d)", my_ss_id, errno);
-            }
-            break;
-        }
-        
-        // Update last heartbeat time for any message received
-        pthread_mutex_lock(&nm.ss_mutex);
-        for (int i = 0; i < nm.ss_count; i++) {
-            if (nm.ss_list[i].id == my_ss_id) {
-                nm.ss_list[i].last_heartbeat = time(NULL);
-                if (msg.type == MSG_ACK && strcmp(msg.data, "HEARTBEAT") == 0) {
-                    log_formatted(LOG_DEBUG, "Received heartbeat from SS %d", my_ss_id);
+        while (nm.running) {
+            pthread_mutex_lock(&nm.ss_mutex);
+            int still_active = 0;
+            for (int i = 0; i < nm.ss_count; i++) {
+                if (nm.ss_list[i].id == my_ss_id) {
+                    still_active = nm.ss_list[i].active;
+                    break;
                 }
+            }
+            pthread_mutex_unlock(&nm.ss_mutex);
+            
+            if (!still_active) {
+                log_formatted(LOG_INFO, "SS %d marked inactive by heartbeat monitor", my_ss_id);
                 break;
             }
+            
+            sleep(3);
         }
-        pthread_mutex_unlock(&nm.ss_mutex);
-    }
-    
-    // Mark SS as inactive when connection is lost
-    pthread_mutex_lock(&nm.ss_mutex);
-    for (int i = 0; i < nm.ss_count; i++) {
-        if (nm.ss_list[i].id == my_ss_id) {
-            nm.ss_list[i].active = 0;
-            log_formatted(LOG_INFO, "Marked SS %d as inactive", my_ss_id);
-            break;
-        }
-    }
-    pthread_mutex_unlock(&nm.ss_mutex);
-    
+        
+    // Cleanup when heartbeat declares it dead
     close(ss_sock);
+    log_formatted(LOG_INFO, "Closed command socket for SS %d", my_ss_id);
     return NULL;
 }
 
@@ -852,6 +931,7 @@ void* handle_client_connection(void* arg) {
                     if (nm.ss_list[i].id == ss_id) {
                         sprintf(response.data, "%s:%d", 
                                nm.ss_list[i].ip, nm.ss_list[i].client_port);
+                        printf("SS Info sent to client: %s\n", response.data); // Debug line
                         response.status = SUCCESS;
                         break;
                     }
@@ -961,9 +1041,16 @@ void* heartbeat_monitor(void* arg) {
         pthread_mutex_lock(&nm.ss_mutex);
         
         for (int i = 0; i < nm.ss_count; i++) {
-            if (now - nm.ss_list[i].last_heartbeat > HEARTBEAT_TIMEOUT) {
-                log_formatted(LOG_WARNING, "SS %d heartbeat timeout", nm.ss_list[i].id);
+            if (nm.ss_list[i].active && (now - nm.ss_list[i].last_heartbeat > HEARTBEAT_TIMEOUT)) {
+                log_formatted(LOG_WARNING, "SS %d heartbeat timeout (last: %ld sec ago)", 
+                             nm.ss_list[i].id, now - nm.ss_list[i].last_heartbeat);
                 nm.ss_list[i].active = 0;
+                
+                // Close heartbeat socket if still open
+                if (nm.ss_list[i].hb_sock >= 0) {
+                    close(nm.ss_list[i].hb_sock);
+                    nm.ss_list[i].hb_sock = -1;
+                }
             }
         }
         
@@ -976,14 +1063,16 @@ void* heartbeat_monitor(void* arg) {
 int main() {
     init_name_server();
     
-    pthread_t ss_thread, client_thread, hb_thread;
+    pthread_t ss_thread, ss_hb_thread, client_thread, hb_thread;  // NEW: ss_hb_thread
     pthread_create(&ss_thread, NULL, ss_listener, NULL);
+    pthread_create(&ss_hb_thread, NULL, ss_hb_listener, NULL);     // NEW
     pthread_create(&client_thread, NULL, client_listener, NULL);
     pthread_create(&hb_thread, NULL, heartbeat_monitor, NULL);
     
     printf("[NM] Name Server running. Press Ctrl+C to stop.\n");
     
     pthread_join(ss_thread, NULL);
+    pthread_join(ss_hb_thread, NULL);  // NEW
     pthread_join(client_thread, NULL);
     pthread_join(hb_thread, NULL);
     

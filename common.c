@@ -33,17 +33,33 @@ void init_message(Message *msg) {
 }
 
 void serialize_message(Message *msg, char *buffer) {
-    sprintf(buffer, "%d|%d|%s|%s|%d|%d|%d|%d|%s|%s",
-            msg->type,
-            msg->status,
-            msg->sender,
-            msg->filename,
-            msg->sentence_index,
-            msg->word_index,
-            msg->ss_id,
-            msg->access,
-            msg->target_user,
-            msg->data);
+    // Serialize in this order: - N
+    // 0: type
+    // 1: status
+    // 2: sender
+    // 3: filename
+    // 4: sentence_index
+    // 5: word_index
+    // 6: ss_id
+    // 7: client_port (NEW)
+    // 8: nm_port (NEW)
+    // 9: access
+    // 10: target_user
+    // 11: data (LAST - can contain anything including |)
+    
+    sprintf(buffer, "%d|%d|%s|%s|%d|%d|%d|%d|%d|%d|%s|%s",
+            msg->type,           // 0
+            msg->status,         // 1
+            msg->sender,         // 2
+            msg->filename,       // 3
+            msg->sentence_index, // 4
+            msg->word_index,     // 5
+            msg->ss_id,          // 6
+            msg->client_port,    // 7 (NEW)
+            msg->nm_port,        // 8 (NEW)
+            msg->access,         // 9
+            msg->target_user,    // 10
+            msg->data);          // 11 (LAST)
 }
 
 void deserialize_message(char *buffer, Message *msg) {
@@ -51,9 +67,18 @@ void deserialize_message(char *buffer, Message *msg) {
     char *p = buffer;
     int field = 0;
 
-    while (field < 10 && p) {
-        char *sep = strchr(p, '|');
-        size_t len = sep ? (size_t)(sep - p) : strlen(p);
+    while (field < 12 && p) {  // Changed from 10 to 12
+        char *sep;
+        size_t len;
+        
+        // CRITICAL: For the last field (data at field 11), take everything remaining
+        if (field == 11) {
+            sep = NULL;  // No more separators
+            len = strlen(p);
+        } else {
+            sep = strchr(p, '|');
+            len = sep ? (size_t)(sep - p) : strlen(p);
+        }
 
         /* create a temporary null-terminated token (may be empty) */
         char token_buf[MAX_BUFFER];
@@ -65,29 +90,42 @@ void deserialize_message(char *buffer, Message *msg) {
             switch (field) {
                 case 0: msg->type = atoi(token_buf); break;
                 case 1: msg->status = atoi(token_buf); break;
-                case 2: strncpy(msg->sender, token_buf, MAX_USERNAME-1); msg->sender[MAX_USERNAME-1] = '\0'; break;
-                case 3: strncpy(msg->filename, token_buf, MAX_FILENAME-1); msg->filename[MAX_FILENAME-1] = '\0'; break;
+                case 2: 
+                    strncpy(msg->sender, token_buf, MAX_USERNAME-1); 
+                    msg->sender[MAX_USERNAME-1] = '\0'; 
+                    break;
+                case 3: 
+                    strncpy(msg->filename, token_buf, MAX_FILENAME-1); 
+                    msg->filename[MAX_FILENAME-1] = '\0'; 
+                    break;
                 case 4: msg->sentence_index = atoi(token_buf); break;
                 case 5: msg->word_index = atoi(token_buf); break;
                 case 6: msg->ss_id = atoi(token_buf); break;
-                case 7: msg->access = atoi(token_buf); break;
-                case 8: strncpy(msg->target_user, token_buf, MAX_USERNAME-1); msg->target_user[MAX_USERNAME-1] = '\0'; break;
-                case 9: strncpy(msg->data, token_buf, MAX_BUFFER-1); msg->data[MAX_BUFFER-1] = '\0'; break;
+                case 7: msg->client_port = atoi(token_buf); break;  // NEW
+                case 8: msg->nm_port = atoi(token_buf); break;      // NEW
+                case 9: msg->access = atoi(token_buf); break;
+                case 10: 
+                    strncpy(msg->target_user, token_buf, MAX_USERNAME-1); 
+                    msg->target_user[MAX_USERNAME-1] = '\0'; 
+                    break;
+                case 11: 
+                    strncpy(msg->data, token_buf, MAX_BUFFER-1); 
+                    msg->data[MAX_BUFFER-1] = '\0'; 
+                    break;
             }
         } else {
             /* empty token: keep defaults from init_message() for numeric fields,
                and leave strings as empty (already zeroed by init_message). */
             if (field == 2) msg->sender[0] = '\0';
             if (field == 3) msg->filename[0] = '\0';
-            if (field == 8) msg->target_user[0] = '\0';
-            if (field == 9) msg->data[0] = '\0';
+            if (field == 10) msg->target_user[0] = '\0';
+            if (field == 11) msg->data[0] = '\0';
         }
 
         field++;
         if (!sep) break;
         p = sep + 1;
     }
-    // implemented a parser that can handle empty fields correctly instead of strtok and strtok_r - S
 }
 
 int send_message(int sock, Message *msg) {

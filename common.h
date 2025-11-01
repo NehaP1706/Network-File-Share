@@ -49,6 +49,11 @@
 #define ERR_NOT_OWNER 401
 #define ERR_USER_NOT_FOUND 406
 
+// Ports
+#define NM_SS_PORT 8080          // Existing - commands
+#define NM_SS_HB_PORT 8082       // NEW - heartbeats only
+#define NM_CLIENT_PORT 8081      // Existing
+
 // Message Types
 typedef enum {
     MSG_REG_SS,           // Storage Server Registration
@@ -111,7 +116,8 @@ typedef struct {
     char ip[INET_ADDRSTRLEN];
     int nm_port;
     int client_port;
-    int sock;  // Socket to NM
+    int sock;        // Command socket (port 8080)
+    int hb_sock;     // ADD THIS: Heartbeat socket (port 8082)
     int active;
     time_t last_heartbeat;
     char files[MAX_FILES][MAX_FILENAME];
@@ -136,6 +142,8 @@ typedef struct {
     int sentence_index;
     int word_index;
     int ss_id;
+    int client_port;     // ADD THIS: For SS registration
+    int nm_port;         // ADD THIS: For SS registration
     AccessType access;
     char target_user[MAX_USERNAME];
 } Message;

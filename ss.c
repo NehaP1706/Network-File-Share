@@ -3,8 +3,10 @@
 #include "file_ops.h"
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <arpa/inet.h>
 #include <ifaddrs.h>
+#include <sys/time.h>
 
 #define SS_STORAGE_DIR "./ss_storage"
 #define HEARTBEAT_INTERVAL 5
@@ -18,7 +20,8 @@ typedef struct {
     char ip[INET_ADDRSTRLEN];
     int nm_port;
     int client_port;
-    int nm_sock;
+    int nm_sock;                 // Existing - for commands
+    int nm_hb_sock;              // NEW - for heartbeats
     int client_sock;
     char storage_path[MAX_PATH];
     
@@ -100,6 +103,7 @@ void init_storage_server(const char *nm_ip, int nm_port, int client_port) {
 
     ss.nm_port = nm_port;
     ss.client_port = client_port;
+    printf("[SS] System client port: %d\n", ss.client_port);
     ss.id = getpid();
     ss.running = 1;
     
@@ -124,15 +128,31 @@ void init_storage_server(const char *nm_ip, int nm_port, int client_port) {
     printf("[SS %d] Client port: %d\n", ss.id, ss.client_port);
 }
 
+void setup_nm_socket_options() {
+    // Enable TCP keepalive to detect dead connections
+    int keepalive = 1;
+    setsockopt(ss.nm_sock, SOL_SOCKET, SO_KEEPALIVE, &keepalive, sizeof(keepalive));
+    
+    // Set keepalive parameters (Linux-specific)
+    #ifdef __linux__
+    int keepidle = 10;   // Start probes after 10 seconds of idle
+    int keepintvl = 5;   // Send probes every 5 seconds
+    int keepcnt = 3;     // Close after 3 failed probes
+    setsockopt(ss.nm_sock, IPPROTO_TCP, TCP_KEEPIDLE, &keepidle, sizeof(keepidle));
+    setsockopt(ss.nm_sock, IPPROTO_TCP, TCP_KEEPINTVL, &keepintvl, sizeof(keepintvl));
+    setsockopt(ss.nm_sock, IPPROTO_TCP, TCP_KEEPCNT, &keepcnt, sizeof(keepcnt));
+    #endif
+    
+    log_formatted(LOG_INFO, "Socket keepalive configured");
+}
+
 void connect_to_nm(const char *nm_ip, int nm_port) {
+    // Command socket
     ss.nm_sock = socket(AF_INET, SOCK_STREAM, 0);
     if (ss.nm_sock < 0) {
         perror("Socket creation failed");
         exit(1);
     }
-    
-    // FIXED: Set socket timeouts
-    // set_socket_timeouts(ss.nm_sock, SOCKET_TIMEOUT, SOCKET_TIMEOUT);
     
     struct sockaddr_in nm_addr;
     nm_addr.sin_family = AF_INET;
@@ -143,9 +163,30 @@ void connect_to_nm(const char *nm_ip, int nm_port) {
         perror("Connection to NM failed");
         exit(1);
     }
+    setup_nm_socket_options();
     
-    printf("[SS %d] Connected to Name Server at %s:%d\n", ss.id, nm_ip, nm_port);
-    log_formatted(LOG_INFO, "Connected to NM at %s:%d", nm_ip, nm_port);
+    // NEW: Heartbeat socket
+    ss.nm_hb_sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (ss.nm_hb_sock < 0) {
+        perror("Heartbeat socket creation failed");
+        exit(1);
+    }
+    
+    struct sockaddr_in hb_addr;
+    hb_addr.sin_family = AF_INET;
+    hb_addr.sin_port = htons(NM_SS_HB_PORT);
+    inet_pton(AF_INET, nm_ip, &hb_addr.sin_addr);
+    
+    if (connect(ss.nm_hb_sock, (struct sockaddr*)&hb_addr, sizeof(hb_addr)) < 0) {
+        perror("Connection to NM heartbeat port failed");
+        close(ss.nm_sock);
+        exit(1);
+    }
+    
+    printf("[SS %d] Connected to Name Server at %s:%d (cmd) and %s:%d (hb)\n", 
+           ss.id, nm_ip, nm_port, nm_ip, NM_SS_HB_PORT);
+    log_formatted(LOG_INFO, "Connected to NM at %s:%d (cmd) and %s:%d (hb)", 
+                  nm_ip, nm_port, nm_ip, NM_SS_HB_PORT);
 }
 
 void scan_and_register_files() {
@@ -160,7 +201,10 @@ void scan_and_register_files() {
     msg.type = MSG_REG_SS;
     msg.ss_id = ss.id;
     strcpy(msg.sender, ss.ip);
-    msg.sentence_index = ss.client_port;
+    msg.client_port = ss.client_port;  // FIX: Use proper field
+    printf("[SS %d] Registering with NM: IP=%s, Client Port=%d\n", 
+           ss.id, ss.ip, ss.client_port);
+    msg.nm_port = ss.nm_port;       // Keep this for nm_port
     
     struct dirent *entry;
     char file_list[MAX_BUFFER] = "";
@@ -327,7 +371,7 @@ int write_file_ss(const char *filename, int sent_idx, int word_idx, const char *
     
     log_formatted(LOG_DEBUG, "File has %d sentences before insertion", fc->sentence_count);
     
-    if (sent_idx < 0 || sent_idx > fc->sentence_count) { //Changed >= to >
+    if (sent_idx < 0 || sent_idx >= fc->sentence_count) {
         log_formatted(LOG_ERROR, "Invalid sentence index: %d (file has %d sentences)", 
                      sent_idx, fc->sentence_count);
         free_file_content(fc);
@@ -612,123 +656,142 @@ void* handle_nm_communication(void* arg) {
     (void)arg;
     Message msg;
     
+    // Set a reasonable timeout so we don't block forever
+    struct timeval tv;
+    tv.tv_sec = 1;  // 1 second timeout for receives
+    tv.tv_usec = 0;
+    setsockopt(ss.nm_sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    
+    log_formatted(LOG_INFO, "NM communication thread started");
+    
     while (ss.running) {
-        //pthread_mutex_lock(&nm_comm_mutex);
         int recv_result = recv_message(ss.nm_sock, &msg);
-        //pthread_mutex_unlock(&nm_comm_mutex);
         
         if (recv_result < 0) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 // Timeout - this is normal, just continue
-                usleep(100000); // Sleep 100ms
                 continue;
             }
-            log_formatted(LOG_ERROR, "Lost connection to NM, errno: %d", errno);
+            if (errno == EINTR) {
+                // Interrupted system call - just retry
+                continue;
+            }
+            
+            log_formatted(LOG_ERROR, "Lost connection to NM (errno: %d)", errno);
             ss.running = 0;
             break;
         }
         
-        // Skip heartbeat ACKs, imp!! - N
-        if (msg.type == MSG_ACK && strcmp(msg.data, "HEARTBEAT_ACK") == 0) {
-            log_formatted(LOG_DEBUG, "Received heartbeat ACK from NM");
-            continue;
-        }
-        
+        // Process actual commands from NM
         Message response;
         init_message(&response);
         response.type = MSG_ACK;
         response.ss_id = ss.id;
         
-        log_formatted(LOG_REQUEST, "NM request: %d for file %s", msg.type, msg.filename);
+        log_formatted(LOG_REQUEST, "NM request: type=%d, file=%s", msg.type, msg.filename);
         
         switch (msg.type) {
             case MSG_CREATE:
                 response.status = create_file_ss(msg.filename);
+                log_formatted(LOG_INFO, "CREATE %s: status=%d", msg.filename, response.status);
                 break;
                 
             case MSG_DELETE:
                 response.status = delete_file_ss(msg.filename);
+                log_formatted(LOG_INFO, "DELETE %s: status=%d", msg.filename, response.status);
                 break;
                 
             case MSG_SS_INFO: {
                 FileMetadata meta;
-                memset(&meta, 0, sizeof(FileMetadata));  // ADDED: Initialize
+                memset(&meta, 0, sizeof(FileMetadata));
                 
                 if (strcmp(msg.data, "READ_CONTENT") == 0) {
                     char buffer[MAX_BUFFER];
                     response.status = read_file_ss(msg.filename, buffer);
                     if (response.status == SUCCESS) {
                         strncpy(response.data, buffer, MAX_BUFFER - 1);
+                        response.data[MAX_BUFFER - 1] = '\0';
                         log_formatted(LOG_DEBUG, "Returning file content (%zu bytes)", strlen(buffer));
+                    } else {
+                        log_formatted(LOG_ERROR, "Failed to read file %s: status=%d", 
+                                     msg.filename, response.status);
                     }
                 } else {
-                    // FIXED: Get file statistics and format response
                     response.status = get_file_info_ss(msg.filename, &meta);
                     if (response.status == SUCCESS) {
-                        // Changed delimiting to ; to avoid conflict - N
-                        sprintf(response.data, "%zu;%d;%d;%ld;%ld", 
-                                meta.size, meta.word_count, meta.char_count, 
-                                meta.modified, meta.accessed);                                                                                                                                   
+                        snprintf(response.data, MAX_BUFFER, "%zu|%d|%d|%ld|%ld", 
+                            meta.size, meta.word_count, meta.char_count, 
+                            meta.modified, meta.accessed);
                         
-                        // ADDED: Log what we're sending
-                        log_formatted(LOG_INFO, "Sending metadata: size=%zu, words=%d, chars=%d, data='%s'", 
-                                     meta.size, meta.word_count, meta.char_count, response.data);                   
+                        log_formatted(LOG_INFO, "Sending metadata for %s: size=%zu, words=%d, chars=%d", 
+                                     msg.filename, meta.size, meta.word_count, meta.char_count);
                     } else {
-                        log_formatted(LOG_ERROR, "Failed to get file info for %s, status=%d", 
+                        log_formatted(LOG_ERROR, "Failed to get file info for %s: status=%d", 
                                      msg.filename, response.status);
                     }
                 }
                 break;
             }
-
-            case MSG_ACK:
-                log_formatted(LOG_DEBUG, "Received ACK from NM");
-                continue;
             
             default:
+                log_formatted(LOG_WARNING, "Unknown message type from NM: %d", msg.type);
                 response.status = ERR_INVALID_OPERATION;
                 break;
         }
         
-        // The lack of this critical section was mostly causing an issue.. - N
-        pthread_mutex_lock(&nm_comm_mutex);
-        send_message(ss.nm_sock, &response);
-        pthread_mutex_unlock(&nm_comm_mutex);
+        // NEW: No mutex needed, dedicated socket
+        int send_result = send_message(ss.nm_sock, &response);
         
-        log_formatted(LOG_RESPONSE, "Response to NM: %d", response.status);
+        if (send_result < 0) {
+            log_formatted(LOG_ERROR, "Failed to send response to NM (errno: %d)", errno);
+            if (errno == EPIPE || errno == ECONNRESET || errno == ENOTCONN) {
+                log_formatted(LOG_ERROR, "Connection to NM broken, shutting down");
+                ss.running = 0;
+                break;
+            }
+        } else {
+            log_formatted(LOG_RESPONSE, "Sent response to NM: status=%d", response.status);
+        }
     }
     
+    log_formatted(LOG_INFO, "NM communication thread exiting");
     return NULL;
 }
 
-// Certain lockings introduced - N
 void* heartbeat_thread(void* arg) {
     (void)arg;
     
     log_formatted(LOG_INFO, "Heartbeat thread started");
     
-    Message msg;
-    init_message(&msg);
-    msg.type = MSG_ACK;
-    msg.ss_id = ss.id;
-    strcpy(msg.data, "HEARTBEAT");
+    // NEW: Send initial identification on heartbeat socket
+    Message ident;
+    init_message(&ident);
+    ident.type = MSG_ACK;
+    ident.ss_id = ss.id;
+    strcpy(ident.data, "HB_INIT");
+    send_message(ss.nm_hb_sock, &ident);
     
     while (ss.running) {
         sleep(HEARTBEAT_INTERVAL);
         
+        Message msg;
+        init_message(&msg);
+        msg.type = MSG_ACK;
+        msg.ss_id = ss.id;
+        strcpy(msg.data, "HEARTBEAT");
+        
         log_formatted(LOG_DEBUG, "Sending heartbeat to NM");
         
-        pthread_mutex_lock(&nm_comm_mutex);
-        int result = send_message(ss.nm_sock, &msg);
-        pthread_mutex_unlock(&nm_comm_mutex);
+        // NEW: Use heartbeat socket, no mutex needed
+        int result = send_message(ss.nm_hb_sock, &msg);
         
         if (result < 0) {
-            if (errno == EPIPE || errno == ECONNRESET) {
-                log_formatted(LOG_ERROR, "Connection lost to NM");
+            if (errno == EPIPE || errno == ECONNRESET || errno == ENOTCONN) {
+                log_formatted(LOG_ERROR, "Connection lost to NM (errno: %d)", errno);
                 ss.running = 0;
                 break;
             }
-            log_formatted(LOG_WARNING, "Failed to send heartbeat, errno: %d", errno);
+            log_formatted(LOG_WARNING, "Heartbeat send failed (errno: %d), will retry", errno);
         } else {
             log_formatted(LOG_DEBUG, "Heartbeat sent successfully");
         }
@@ -747,6 +810,28 @@ int main(int argc, char *argv[]) {
     char *nm_ip = argv[1];
     int nm_port = atoi(argv[2]);
     int client_port = atoi(argv[3]);
+
+    // ADD: Validate ports
+    if (nm_port <= 0 || nm_port > 65535) {
+        printf("Error: Invalid NM port number. Must be between 1 and 65535.\n");
+        return 1;
+    }
+    
+    if (client_port <= 0 || client_port > 65535) {
+        printf("Error: Invalid client port number. Must be between 1 and 65535.\n");
+        return 1;
+    }
+    
+    if (client_port == nm_port) {
+        printf("Error: Client port and NM port cannot be the same.\n");
+        return 1;
+    }
+    
+    // Warn if not using standard ports (helpful for debugging)
+    if (nm_port != NM_SS_PORT) {
+        printf("[SS] Warning: Connecting to NM on non-standard port %d (expected %d)\n", 
+               nm_port, NM_SS_PORT);
+    }
     
     init_storage_server(nm_ip, nm_port, client_port);
     connect_to_nm(nm_ip, nm_port);
@@ -764,6 +849,8 @@ int main(int argc, char *argv[]) {
         log_formatted(LOG_ERROR, "Failed to create client thread");
         return 1;
     }
+
+    sleep(1); // Ensure NM thread is up before heartbeat thread starts
     
     if (pthread_create(&hb_thread, NULL, heartbeat_thread, NULL) != 0) {
         log_formatted(LOG_ERROR, "Failed to create heartbeat thread");
@@ -778,6 +865,7 @@ int main(int argc, char *argv[]) {
     pthread_join(hb_thread, NULL);
     
     close(ss.nm_sock);
+    close(ss.nm_hb_sock);
     close(ss.client_sock);
     close_logger();
     
