@@ -20,8 +20,8 @@ typedef struct {
     char ip[INET_ADDRSTRLEN];
     int nm_port;
     int client_port;
-    int nm_sock;                 // Existing - for commands
-    int nm_hb_sock;              // NEW - for heartbeats
+    int nm_sock;                 // NEW - command socket to NM - N
+    int nm_hb_sock;              // NEW - for heartbeats - N
     int client_sock;
     char storage_path[MAX_PATH];
     
@@ -128,6 +128,7 @@ void init_storage_server(const char *nm_ip, int nm_port, int client_port) {
     printf("[SS %d] Client port: %d\n", ss.id, ss.client_port);
 }
 
+// Added doe to setup socket options for NM communication, might be unnecessary - N
 void setup_nm_socket_options() {
     // Enable TCP keepalive to detect dead connections
     int keepalive = 1;
@@ -165,7 +166,7 @@ void connect_to_nm(const char *nm_ip, int nm_port) {
     }
     setup_nm_socket_options();
     
-    // NEW: Heartbeat socket
+    // Heartbeat socket configs - N
     ss.nm_hb_sock = socket(AF_INET, SOCK_STREAM, 0);
     if (ss.nm_hb_sock < 0) {
         perror("Heartbeat socket creation failed");
@@ -177,6 +178,7 @@ void connect_to_nm(const char *nm_ip, int nm_port) {
     hb_addr.sin_port = htons(NM_SS_HB_PORT);
     inet_pton(AF_INET, nm_ip, &hb_addr.sin_addr);
     
+    // Start collecting heartbeats from this - N
     if (connect(ss.nm_hb_sock, (struct sockaddr*)&hb_addr, sizeof(hb_addr)) < 0) {
         perror("Connection to NM heartbeat port failed");
         close(ss.nm_sock);
@@ -201,10 +203,10 @@ void scan_and_register_files() {
     msg.type = MSG_REG_SS;
     msg.ss_id = ss.id;
     strcpy(msg.sender, ss.ip);
-    msg.client_port = ss.client_port;  // FIX: Use proper field
+    msg.client_port = ss.client_port;  // Use new fields - N
     printf("[SS %d] Registering with NM: IP=%s, Client Port=%d\n", 
            ss.id, ss.ip, ss.client_port);
-    msg.nm_port = ss.nm_port;       // Keep this for nm_port
+    msg.nm_port = ss.nm_port;       // Use new fields - N
     
     struct dirent *entry;
     char file_list[MAX_BUFFER] = "";
@@ -544,14 +546,14 @@ void* handle_client_request(void* arg) {
     int client_sock = *((int*)arg);
     free(arg);
     
-    // FIXED: Set timeouts for client socket
+    // Set timeouts for client socket
     set_socket_timeouts(client_sock, SOCKET_TIMEOUT, SOCKET_TIMEOUT);
     
     Message msg;
     
     while (ss.running) {
         if (recv_message(client_sock, &msg) < 0) {
-            break;
+            continue; // Was break before - N
         }
         
         Message response;
@@ -782,12 +784,13 @@ void* handle_nm_communication(void* arg) {
     return NULL;
 }
 
+// Edited to handle heartbeat socket, checking alive connections and closing if they are not - N
 void* heartbeat_thread(void* arg) {
     (void)arg;
     
     log_formatted(LOG_INFO, "Heartbeat thread started");
     
-    // NEW: Send initial identification on heartbeat socket
+    // Send initial identification on heartbeat socket - N
     Message ident;
     init_message(&ident);
     ident.type = MSG_ACK;
@@ -806,9 +809,10 @@ void* heartbeat_thread(void* arg) {
         
         log_formatted(LOG_DEBUG, "Sending heartbeat to NM");
         
-        // NEW: Use heartbeat socket, no mutex needed
+        // Use heartbeat socket, no mutex needed - N
         int result = send_message(ss.nm_hb_sock, &msg);
         
+        // Kill off the connection if we get errors indicating it's dead - N
         if (result < 0) {
             if (errno == EPIPE || errno == ECONNRESET || errno == ENOTCONN) {
                 log_formatted(LOG_ERROR, "Connection lost to NM (errno: %d)", errno);

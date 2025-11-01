@@ -32,6 +32,9 @@ void init_message(Message *msg) {
     msg->access = ACCESS_NONE;
 }
 
+// Account for the nm_port and client_port fields - N
+// Both serialize and deserialize functions updated accordingly
+
 void serialize_message(Message *msg, char *buffer) {
     // Serialize in this order: - N
     // 0: type

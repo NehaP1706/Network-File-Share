@@ -17,7 +17,7 @@ typedef struct {
     StorageServerInfo ss_list[MAX_SS];
     int ss_count;
     pthread_mutex_t ss_mutex;
-    pthread_mutex_t ss_sock_mutexes[MAX_SS];  // ADD: One mutex per SS socket - N
+    pthread_mutex_t ss_sock_mutexes[MAX_SS];  // One mutex per SS socket - N
     int next_ss_id;
     
     ClientInfo client_list[MAX_CLIENTS];
@@ -25,7 +25,7 @@ typedef struct {
     pthread_mutex_t client_mutex;
     
     int ss_sock;
-    int ss_hb_sock;            // NEW - heartbeat listener
+    int ss_hb_sock;            // heartbeat listener - N
     int client_sock;
     volatile int running;
 } NameServer;
@@ -67,7 +67,7 @@ void init_name_server() {
     // ADD: Initialize per-SS socket mutexes - N
     for (int i = 0; i < MAX_SS; i++) {
         pthread_mutex_init(&nm.ss_sock_mutexes[i], NULL);
-        nm.ss_list[i].hb_sock = -1;  // FIX: Initialize all to -1
+        nm.ss_list[i].hb_sock = -1;  // Initialize all to -1, set later - N
     }
     
     set_instance_name("NM");
@@ -404,7 +404,7 @@ void handle_create(int client_sock, Message *msg) {
     ss_msg.type = MSG_CREATE;
     strcpy(ss_msg.filename, msg->filename);
     
-    // FIXED: Lock the specific SS socket - N
+    // Lock the specific SS socket - N
     pthread_mutex_lock(&nm.ss_sock_mutexes[ss_idx]);
     send_message(nm.ss_list[ss_idx].sock, &ss_msg);
     
@@ -647,6 +647,7 @@ void handle_exec(int client_sock, Message *msg) {
     log_formatted(LOG_INFO, "Executed file %s for %s", msg->filename, msg->sender);
 }
 
+// handles heartbeats explcitly - N
 void* ss_hb_listener(void* arg) {
     (void) arg;
 
@@ -681,14 +682,14 @@ void* ss_hb_listener(void* arg) {
     return NULL;
 }
 
-// NEW: Add heartbeat handler
+// thread attribute function: heartbeat handler - N
 void* handle_ss_heartbeat(void* arg) {
     int hb_sock = *((int*)arg);
     free(arg);
     
     Message msg;
     
-    // First message identifies the SS
+    // First message identifies the SS - N
     if (recv_message(hb_sock, &msg) < 0 || msg.type != MSG_ACK) {
         close(hb_sock);
         return NULL;
@@ -707,7 +708,7 @@ void* handle_ss_heartbeat(void* arg) {
     }
     pthread_mutex_unlock(&nm.ss_mutex);
     
-    // Receive heartbeats
+    // Receive heartbeats - N
     while (nm.running) {
         if (recv_message(hb_sock, &msg) < 0) {
             log_formatted(LOG_WARNING, "SS %d heartbeat connection lost", my_ss_id);
@@ -727,7 +728,7 @@ void* handle_ss_heartbeat(void* arg) {
         }
     }
 
-    // Heartbeat lost - mark as inactive
+    // Heartbeat lost - mark as inactive - N
     pthread_mutex_lock(&nm.ss_mutex);
     for (int i = 0; i < nm.ss_count; i++) {
         if (nm.ss_list[i].id == my_ss_id) {
@@ -765,11 +766,11 @@ void* handle_ss_connection(void* arg) {
     nm.ss_list[idx].id = msg.ss_id;
     strcpy(nm.ss_list[idx].ip, msg.sender);
     nm.ss_list[idx].nm_port = msg.nm_port;
-    nm.ss_list[idx].client_port = msg.client_port;  // FIX: Use proper field
+    nm.ss_list[idx].client_port = msg.client_port;  // Use proper field - N
     printf("[NM] Registered SS ID: %d, IP: %s, NM Port: %d, Client Port: %d\n", 
            msg.ss_id, msg.sender, msg.nm_port, msg.client_port);
     nm.ss_list[idx].sock = ss_sock;
-    nm.ss_list[idx].hb_sock = -1;  // FIX: Initialize, will be set later
+    nm.ss_list[idx].hb_sock = -1;  // Initialize, will be set later - N
     nm.ss_list[idx].active = 1;
     nm.ss_list[idx].last_heartbeat = time(NULL);
     nm.ss_list[idx].file_count = 0;
@@ -821,7 +822,7 @@ void* handle_ss_connection(void* arg) {
                 break;
             }
             
-            sleep(3);
+            sleep(3); // I set it to 3, we can decide on a suitable value later - N
         }
         
     // Cleanup when heartbeat declares it dead
@@ -1063,16 +1064,16 @@ void* heartbeat_monitor(void* arg) {
 int main() {
     init_name_server();
     
-    pthread_t ss_thread, ss_hb_thread, client_thread, hb_thread;  // NEW: ss_hb_thread
+    pthread_t ss_thread, ss_hb_thread, client_thread, hb_thread;  // ss_hb_thread - N
     pthread_create(&ss_thread, NULL, ss_listener, NULL);
-    pthread_create(&ss_hb_thread, NULL, ss_hb_listener, NULL);     // NEW
+    pthread_create(&ss_hb_thread, NULL, ss_hb_listener, NULL);     // create and join the threads as necessary - N
     pthread_create(&client_thread, NULL, client_listener, NULL);
     pthread_create(&hb_thread, NULL, heartbeat_monitor, NULL);
     
     printf("[NM] Name Server running. Press Ctrl+C to stop.\n");
     
     pthread_join(ss_thread, NULL);
-    pthread_join(ss_hb_thread, NULL);  // NEW
+    pthread_join(ss_hb_thread, NULL);  // join the heartbeat listener thread - N
     pthread_join(client_thread, NULL);
     pthread_join(hb_thread, NULL);
     

@@ -355,13 +355,27 @@ void handle_write(char *filename, char *sent_idx_str) {
     strcpy(msg.sender, client.username);
     msg.sentence_index = sent_idx;
     
-    send_message(ss_sock, &msg);
-    recv_message(ss_sock, &response);
+    // Added checks at every point - N
+    if (send_message(ss_sock, &msg) < 0) {
+        printf("Error: Could not send unlock (connection lost)\n");
+        close(ss_sock);
+        return;
+    }
     
+    if (recv_message(ss_sock, &response) < 0) {
+        printf("Error: Could not receive unlock response (connection lost)\n");
+        close(ss_sock);
+        return;
+    }
+    
+    // Realized when multiple writes are done, unlock might fail - N
     if (response.status == SUCCESS && write_count > 0) {
         printf("Write successful!\n");
     } else if (write_count == 0) {
         printf("No writes performed.\n");
+    } else {
+        printf("Unlock failed!\n");
+        print_error(response.status);
     }
     
     close(ss_sock);
