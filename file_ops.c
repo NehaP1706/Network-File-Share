@@ -194,11 +194,26 @@ int write_file_content(const char *filepath, FileContent *fc) {
         for (int j = 0; j < fc->sentences[i].word_count; j++) {
             fprintf(file, "%s", fc->sentences[i].words[j]);
             
-            // Add space after non-delimiter words (except last word in sentence)
-            if (j < fc->sentences[i].word_count - 1 && 
-                !is_delimiter(fc->sentences[i].words[j][0])) {
-                fprintf(file, " ");
+            // // Add space after non-delimiter words (except last word in sentence)
+            // if (j < fc->sentences[i].word_count - 1 && 
+            //     !is_delimiter(fc->sentences[i].words[j][0])) {
+            //     fprintf(file, " ");
+            // }
+
+                /* Only print a space if:
+               - this is not the last word in the sentence, and
+               - current token is not a delimiter, and
+               - next token is not a delimiter (so we don't get "word .") -S */ 
+ 
+
+                if (j < fc->sentences[i].word_count - 1) {
+                int cur_is_delim = is_delimiter(fc->sentences[i].words[j][0]);
+                int next_is_delim = is_delimiter(fc->sentences[i].words[j + 1][0]);
+                if (!cur_is_delim && !next_is_delim) {
+                    fprintf(file, " ");
+                }
             }
+
         }
         
         // Add space between sentences (except after last)
@@ -223,9 +238,18 @@ char* file_content_to_string(FileContent *fc) {
                 strcpy(result + pos, fc->sentences[i].words[j]);
                 pos += len;
                 
-                if (j < fc->sentences[i].word_count - 1 && 
-                    !is_delimiter(fc->sentences[i].words[j][0])) {
-                    result[pos++] = ' ';
+                /* Only print a space if:
+               - this is not the last word in the sentence, and
+               - current token is not a delimiter, and
+               - next token is not a delimiter (so we don't get "word .") - S */
+  
+
+                if (j < fc->sentences[i].word_count - 1) {
+                    int cur_is_delim = is_delimiter(fc->sentences[i].words[j][0]);
+                    int next_is_delim = is_delimiter(fc->sentences[i].words[j + 1][0]);
+                    if (!cur_is_delim && !next_is_delim) {
+                        result[pos++] = ' ';
+                    }
                 }
             }
         }
@@ -241,11 +265,42 @@ char* file_content_to_string(FileContent *fc) {
 // Heavily edited - N
 int insert_word_in_sentence(FileContent *fc, int sent_idx, int word_idx, const char *word) {
     // Checking validity, might immediately return - N
-    if (sent_idx < 0 || sent_idx >= fc->sentence_count) {
+    if (sent_idx < 0 || sent_idx > fc->sentence_count) { // Changed >= to > - S
         log_formatted(LOG_ERROR, "Invalid sentence index: %d (file has %d sentences)", 
                      sent_idx, fc->sentence_count);
         return -1;
     }
+    
+    /* If caller wants to insert at the end (append a new sentence), make sure
+       the target sentence slot is allocated and counted. This prevents accessing
+       uninitialized memory when sent_idx == fc->sentence_count.  - S */
+
+        if (sent_idx == fc->sentence_count) {
+        /* grow sentences array if needed */
+        if (fc->sentence_count >= fc->capacity) {
+            int newcap = fc->capacity ? fc->capacity * 2 : 10;
+            while (newcap <= fc->sentence_count) newcap *= 2;
+            Sentence *tmp = realloc(fc->sentences, sizeof(Sentence) * newcap);
+            if (!tmp) {
+                log_formatted(LOG_ERROR, "Out of memory expanding sentences");
+                return -1;
+            }
+            fc->sentences = tmp;
+            fc->capacity = newcap;
+        }
+        /* initialize the new (empty) sentence slot */
+        fc->sentences[fc->sentence_count].capacity = 10;
+        fc->sentences[fc->sentence_count].word_count = 0;
+        fc->sentences[fc->sentence_count].words = malloc(sizeof(char*) * fc->sentences[fc->sentence_count].capacity);
+        if (!fc->sentences[fc->sentence_count].words) {
+            log_formatted(LOG_ERROR, "Out of memory allocating words for new sentence");
+            return -1;
+        }
+        /* actually add the sentence to the count so subsequent code can use it */
+        fc->sentence_count++;
+    }
+    
+
     
     Sentence *sent = &fc->sentences[sent_idx];
     

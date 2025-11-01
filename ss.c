@@ -327,7 +327,7 @@ int write_file_ss(const char *filename, int sent_idx, int word_idx, const char *
     
     log_formatted(LOG_DEBUG, "File has %d sentences before insertion", fc->sentence_count);
     
-    if (sent_idx < 0 || sent_idx >= fc->sentence_count) {
+    if (sent_idx < 0 || sent_idx > fc->sentence_count) { //Changed >= to >
         log_formatted(LOG_ERROR, "Invalid sentence index: %d (file has %d sentences)", 
                      sent_idx, fc->sentence_count);
         free_file_content(fc);
