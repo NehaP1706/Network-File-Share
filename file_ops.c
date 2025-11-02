@@ -483,7 +483,7 @@ int create_undo_backup(const char *filepath) {
 }
 
 int restore_from_undo(const char *filepath) {
-    printf("[SS DEBUG] Restoring from undo: %s\n", filepath); // Debug line
+    printf("[SS DEBUG] Restoring from undo: %s\n", filepath); // Debug line - N
     char undo_path[MAX_PATH];
     snprintf(undo_path, sizeof(undo_path), "%s.undo", filepath);
     
@@ -492,7 +492,7 @@ int restore_from_undo(const char *filepath) {
         return -1;
     }
 
-    printf("[SS DEBUG] Undo file exists: %s\n", undo_path); // Debug line
+    printf("[SS DEBUG] Undo file exists: %s\n", undo_path); // Debug line - N
     
     // Copy undo to original
     FILE *src = fopen(undo_path, "r");
@@ -507,22 +507,22 @@ int restore_from_undo(const char *filepath) {
     char buffer[MAX_BUFFER];
     size_t bytes;
 
-    printf("[SS DEBUG] Starting file restoration...\n"); // Debug line
+    printf("[SS DEBUG] Starting file restoration...\n"); // Debug line - N
     
     while ((bytes = fread(buffer, 1, sizeof(buffer), src)) > 0) {
         fwrite(buffer, 1, bytes, dst);
     }
 
-    printf("[SS DEBUG] File restoration completed.\n"); // Debug line
-    
+    printf("[SS DEBUG] File restoration completed.\n"); // Debug line - N
+     
     fclose(src);
     fclose(dst);
     
     // Remove undo file after restoration
     unlink(undo_path);
 
-    printf("[SS DEBUG] Undo file removed: %s\n", undo_path); // Debug line
-    return 200;
+    printf("[SS DEBUG] Undo file removed: %s\n", undo_path); // Debug line - N
+    return 200; // Return 200 to indicate success as per previous convention - N
 }
 
 int undo_backup_exists(const char *filepath) {

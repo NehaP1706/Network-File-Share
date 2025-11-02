@@ -604,10 +604,10 @@ void* handle_client_request(void* arg) {
                 snprintf(filepath, sizeof(filepath), "%s/%s", ss.storage_path, msg.filename);
                 
                 if (undo_backup_exists(filepath)) {
-                    printf("[SS DEBUG] Undo backup exists for %s\n", filepath); // Debug line
+                    printf("[SS DEBUG] Undo backup exists for %s\n", filepath); // Debug line - N
                     response.status = restore_from_undo(filepath);
                 } else {
-                    printf("[SS DEBUG] No undo backup for %s\n", filepath); // Debug line
+                    printf("[SS DEBUG] No undo backup for %s\n", filepath); // Debug line - N
                     response.status = ERR_INVALID_OPERATION;
                 }
                 send_message(client_sock, &response);
