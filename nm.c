@@ -1010,6 +1010,7 @@ void* client_listener(void* arg) {
     addr.sin_addr.s_addr = INADDR_ANY;
     addr.sin_port = htons(NM_CLIENT_PORT);
     
+   // printf("Client listener binding to port %d\n", NM_CLIENT_PORT);
     bind(nm.client_sock, (struct sockaddr*)&addr, sizeof(addr));
     listen(nm.client_sock, MAX_CLIENTS);
     

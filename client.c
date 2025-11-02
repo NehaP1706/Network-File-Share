@@ -297,6 +297,11 @@ void handle_write(char *filename, char *sent_idx_str) {
     
     if (response.status != SUCCESS) {
         print_error(response.status);
+        if(response.status == ERR_SENTENCE_LOCKED)
+        {
+            return;
+        } // don't close socket connection when sentence cannot be locked - S 
+        // still doesn't resolve the issue
         close(ss_sock);
         return;
     }
@@ -478,7 +483,22 @@ void handle_info(char *filename) {
 // }
 
 void handle_stream(char *filename) {
-    int ss_sock = connect_to_ss(filename /* note: connect_to_ss expects "ip:port"; adjust call if you instead get ss_info elsewhere */);
+    Message msg;
+    init_message(&msg);
+    msg.type = MSG_READ;
+    strcpy(msg.sender, client.username);
+    strcpy(msg.filename, filename);
+    
+    send_message(client.nm_sock, &msg);
+    
+    Message response;
+    recv_message(client.nm_sock, &response);
+    
+    if (response.status != SUCCESS) {
+        print_error(response.status);
+        return;
+    }
+    int ss_sock = connect_to_ss(response.data ); /* note: connect_to_ss expects "ip:port"; adjust call if you instead get ss_info elsewhere */
     if (ss_sock < 0) {
         printf("Failed to connect to storage server for streaming\n");
         return;

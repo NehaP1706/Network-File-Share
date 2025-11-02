@@ -553,6 +553,9 @@ void* handle_client_request(void* arg) {
     
     while (ss.running) {
         if (recv_message(client_sock, &msg) < 0) {
+             //log_formatted(LOG_INFO, "Client disconnected (socket=%d)", client_sock);
+
+            //break;
             continue; // Was break before - N
         }
         
