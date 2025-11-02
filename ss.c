@@ -95,7 +95,7 @@ int get_system_ip(char *ip_buffer, size_t buffer_size) {
     return 0;
 }
 
-void init_storage_server(const char *nm_ip, int nm_port, int client_port) {
+void init_storage_server(const char *nm_ip, int nm_port, int client_port, int ss_id) {
     
     if (get_system_ip(ss.ip, sizeof(ss.ip)) != 0) {
         fprintf(stderr, "[SS] Warning: Could not determine system IP, using loopback\n");
@@ -104,11 +104,18 @@ void init_storage_server(const char *nm_ip, int nm_port, int client_port) {
     ss.nm_port = nm_port;
     ss.client_port = client_port;
     printf("[SS] System client port: %d\n", ss.client_port);
-    ss.id = getpid();
+    ss.id = ss_id;
     ss.running = 1;
     
     snprintf(ss.storage_path, sizeof(ss.storage_path), "%s_%d", SS_STORAGE_DIR, ss.id);
-    mkdir(ss.storage_path, 0777);
+    
+    struct stat st = {0};
+    if (stat(ss.storage_path, &st) == -1) {
+        mkdir(ss.storage_path, 0777);
+        printf("[SS %d] Created new storage directory: %s\n", ss.id, ss.storage_path);
+    } else {
+        printf("[SS %d] Using existing storage directory: %s\n", ss.id, ss.storage_path);
+    }
     
     pthread_mutex_init(&nm_comm_mutex, NULL);
     pthread_mutex_init(&ss.locks_mutex, NULL);
@@ -835,14 +842,15 @@ void* heartbeat_thread(void* arg) {
 }
 
 int main(int argc, char *argv[]) {
-    if (argc != 4) {
-        printf("Usage: %s <nm_ip> <nm_port> <client_port>\n", argv[0]);
+    if (argc != 5) {
+        printf("Usage: %s <nm_ip> <nm_port> <client_port> <dir_name>\n", argv[0]);
         return 1;
     }
     
     char *nm_ip = argv[1];
     int nm_port = atoi(argv[2]);
     int client_port = atoi(argv[3]);
+    int ss_id = atoi(argv[4]);
 
     // ADD: Validate ports
     if (nm_port <= 0 || nm_port > 65535) {
@@ -866,7 +874,7 @@ int main(int argc, char *argv[]) {
                nm_port, NM_SS_PORT);
     }
     
-    init_storage_server(nm_ip, nm_port, client_port);
+    init_storage_server(nm_ip, nm_port, client_port, ss_id);
     connect_to_nm(nm_ip, nm_port);
     scan_and_register_files();
     
