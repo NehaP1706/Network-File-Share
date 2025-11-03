@@ -114,7 +114,7 @@ void init_storage_server(const char *nm_ip, int nm_port, int client_port, int ss
         mkdir(ss.storage_path, 0777);
         printf("[SS %d] Created new storage directory: %s\n", ss.id, ss.storage_path);
     } else {
-        printf("[SS %d] Using existing storage directory: %s\n", ss.id, ss.storage_path);
+        printf("[SS %d] Using existing storage directory: %s\n", ss.id, ss.storage_path);        
     }
     
     pthread_mutex_init(&nm_comm_mutex, NULL);
@@ -809,6 +809,13 @@ void* heartbeat_thread(void* arg) {
     ident.ss_id = ss.id;
     strcpy(ident.data, "HB_INIT");
     send_message(ss.nm_hb_sock, &ident);
+
+    Message msg;
+    init_message(&msg);
+    msg.type = MSG_ACK;
+    msg.ss_id = ss.id;
+    strcpy(msg.data, "HEARTBEAT");
+    send_message(ss.nm_hb_sock, &msg);
     
     while (ss.running) {
         sleep(HEARTBEAT_INTERVAL);
@@ -892,6 +899,7 @@ int main(int argc, char *argv[]) {
     }
 
     sleep(1); // Ensure NM thread is up before heartbeat thread starts
+    // This was causing certain issues so i commented it out - N
     
     if (pthread_create(&hb_thread, NULL, heartbeat_thread, NULL) != 0) {
         log_formatted(LOG_ERROR, "Failed to create heartbeat thread");

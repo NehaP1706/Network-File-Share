@@ -756,13 +756,45 @@ void* handle_ss_connection(void* arg) {
     
     pthread_mutex_lock(&nm.ss_mutex);
     
-    if (nm.ss_count >= MAX_SS) {
-        pthread_mutex_unlock(&nm.ss_mutex);
-        close(ss_sock);
-        return NULL;
+    // Check if this SS ID already exists (reconnection scenario) - N
+    int existing_idx = -1;
+    for (int i = 0; i < nm.ss_count; i++) {
+        if (nm.ss_list[i].id == msg.ss_id) {
+            existing_idx = i;
+            log_formatted(LOG_INFO, "SS %d reconnecting - replacing old connection", msg.ss_id);
+            break;
+        }
     }
     
-    int idx = nm.ss_count;
+    int idx;
+    if (existing_idx >= 0) {
+        // Reconnection: close old sockets and reuse the slot -  N
+        idx = existing_idx;
+        
+        // Mark old connection as dead immediately - N
+        nm.ss_list[idx].active = 0;
+        
+        // Close old sockets - N
+        if (nm.ss_list[idx].sock >= 0) {
+            close(nm.ss_list[idx].sock);
+        }
+        if (nm.ss_list[idx].hb_sock >= 0) {
+            close(nm.ss_list[idx].hb_sock);
+        }
+        
+        log_formatted(LOG_INFO, "Closed old sockets for SS %d", msg.ss_id);
+    } else {
+        // New SS: check capacity - N
+        if (nm.ss_count >= MAX_SS) {
+            pthread_mutex_unlock(&nm.ss_mutex);
+            close(ss_sock);
+            log_formatted(LOG_ERROR, "Cannot accept SS %d: max capacity reached", msg.ss_id);
+            return NULL;
+        }
+        idx = nm.ss_count;
+        nm.ss_count++;
+    }
+    
     nm.ss_list[idx].id = msg.ss_id;
     strcpy(nm.ss_list[idx].ip, msg.sender);
     nm.ss_list[idx].nm_port = msg.nm_port;
@@ -772,7 +804,7 @@ void* handle_ss_connection(void* arg) {
     nm.ss_list[idx].sock = ss_sock;
     nm.ss_list[idx].hb_sock = -1;  // Initialize, will be set later - N
     nm.ss_list[idx].active = 1;
-    nm.ss_list[idx].last_heartbeat = time(NULL);
+    // nm.ss_list[idx].last_heartbeat = time(NULL);
     nm.ss_list[idx].file_count = 0;
     
     // Parse file list
@@ -781,22 +813,39 @@ void* handle_ss_connection(void* arg) {
     while (token && nm.ss_list[idx].file_count < MAX_FILES) {
         strcpy(nm.ss_list[idx].files[nm.ss_list[idx].file_count], token);
         
-        // Add to trie
-        FileMetadata meta;
-        memset(&meta, 0, sizeof(FileMetadata));
-        strcpy(meta.filename, token);
-        meta.ss_id = msg.ss_id;
-        strcpy(meta.owner, "system");
-        meta.created = time(NULL);
-        meta.modified = meta.created;
-        meta.accessed = meta.created;
+        // Check if file already exists in trie - N
+        FileMetadata *existing = trie_search(nm.file_trie, token);
+    
+        // This means we have a reconnecting SS, so preserve metadata - N
+        if (existing) {
+            log_formatted(LOG_INFO, "Preserving metadata for existing file: %s (owner: %s)", 
+                        token, existing->owner);
         
-        trie_insert(nm.file_trie, token, &meta);
+            existing->ss_id = msg.ss_id;
+            trie_update(nm.file_trie, token, existing);
+            free(existing);
+        } else {
+            // The usual, create new - N
+            FileMetadata meta;
+            memset(&meta, 0, sizeof(FileMetadata));
+            strcpy(meta.filename, token);
+            meta.ss_id = msg.ss_id;
+            strcpy(meta.owner, "system");
+            meta.created = time(NULL);
+            meta.modified = meta.created;
+            meta.accessed = meta.created;
+            meta.acl_count = 0;
+            
+            trie_insert(nm.file_trie, token, &meta);
+            log_formatted(LOG_INFO, "Registered new file: %s", token);
+        }
         
         nm.ss_list[idx].file_count++;
         token = strtok(NULL, ",");
     }
     free(file_list);
+
+    nm.ss_list[idx].last_heartbeat = time(NULL); // Moved here to give more time for the heartbeat and initialization - N
     
     int my_ss_id = msg.ss_id;
     nm.ss_count++;
@@ -1043,15 +1092,22 @@ void* heartbeat_monitor(void* arg) {
         pthread_mutex_lock(&nm.ss_mutex);
         
         for (int i = 0; i < nm.ss_count; i++) {
-            if (nm.ss_list[i].active && (now - nm.ss_list[i].last_heartbeat > HEARTBEAT_TIMEOUT)) {
-                log_formatted(LOG_WARNING, "SS %d heartbeat timeout (last: %ld sec ago)", 
-                             nm.ss_list[i].id, now - nm.ss_list[i].last_heartbeat);
-                nm.ss_list[i].active = 0;
+            if (nm.ss_list[i].active) {
+                time_t idle = now - nm.ss_list[i].last_heartbeat;
                 
-                // Close heartbeat socket if still open
-                if (nm.ss_list[i].hb_sock >= 0) {
-                    close(nm.ss_list[i].hb_sock);
-                    nm.ss_list[i].hb_sock = -1;
+                // Give extra grace period (30 seconds) for initial connection - N
+                // The grace value can be adjusted as needed - N
+                int timeout = (idle < 30) ? 30 : HEARTBEAT_TIMEOUT;
+                
+                if (idle > timeout) {
+                    log_formatted(LOG_WARNING, "SS %d heartbeat timeout (last: %ld sec ago)", 
+                                 nm.ss_list[i].id, idle);
+                    nm.ss_list[i].active = 0;
+                    
+                    if (nm.ss_list[i].hb_sock >= 0) {
+                        close(nm.ss_list[i].hb_sock);
+                        nm.ss_list[i].hb_sock = -1;
+                    }
                 }
             }
         }
