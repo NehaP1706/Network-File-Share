@@ -530,3 +530,129 @@ int undo_backup_exists(const char *filepath) {
     snprintf(undo_path, sizeof(undo_path), "%s.undo", filepath);
     return (access(undo_path, F_OK) == 0);
 }
+
+int create_checkpoint(const char *filepath, const char *tag) {
+    char checkpoint_path[MAX_PATH];
+    snprintf(checkpoint_path, sizeof(checkpoint_path), "%s.checkpoint_%s", filepath, tag);
+    
+    // Check if checkpoint already exists
+    if (access(checkpoint_path, F_OK) == 0) {
+        return ERR_FILE_EXISTS;
+    }
+    
+    // Copy file to checkpoint
+    FILE *src = fopen(filepath, "r");
+    if (!src) return ERR_FILE_NOT_FOUND;
+    
+    FILE *dst = fopen(checkpoint_path, "w");
+    if (!dst) {
+        fclose(src);
+        return ERR_SERVER_ERROR;
+    }
+    
+    char buffer[MAX_BUFFER];
+    size_t bytes;
+    while ((bytes = fread(buffer, 1, sizeof(buffer), src)) > 0) {
+        fwrite(buffer, 1, bytes, dst);
+    }
+    
+    fclose(src);
+    fclose(dst);
+    
+    log_formatted(LOG_INFO, "Created checkpoint '%s' for %s", tag, filepath);
+    return SUCCESS;
+}
+
+int list_checkpoints(const char *filepath, char *buffer, int buffer_size) {
+    char dir_path[MAX_PATH];
+    char filename[MAX_FILENAME];
+    
+    // Extract directory and filename
+    strncpy(dir_path, filepath, sizeof(dir_path));
+    char *last_slash = strrchr(dir_path, '/');
+    if (last_slash) {
+        strcpy(filename, last_slash + 1);
+        *last_slash = '\0';
+    } else {
+        strcpy(filename, filepath);
+        strcpy(dir_path, ".");
+    }
+    
+    DIR *dir = opendir(dir_path);
+    if (!dir) return ERR_SERVER_ERROR;
+    
+    buffer[0] = '\0';
+    int pos = 0;
+    struct dirent *entry;
+    char checkpoint_prefix[MAX_PATH];
+    snprintf(checkpoint_prefix, sizeof(checkpoint_prefix), "%s.checkpoint_", filename);
+    int prefix_len = strlen(checkpoint_prefix);
+    
+    while ((entry = readdir(dir)) != NULL) {
+        if (strncmp(entry->d_name, checkpoint_prefix, prefix_len) == 0) {
+            // Extract tag name
+            const char *tag = entry->d_name + prefix_len;
+            pos += snprintf(buffer + pos, buffer_size - pos, "%s\n", tag);
+            if (pos >= buffer_size - 1) break;
+        }
+    }
+    
+    closedir(dir);
+    
+    if (pos == 0) {
+        snprintf(buffer, buffer_size, "No checkpoints found.\n");
+    }
+    
+    return SUCCESS;
+}
+
+int view_checkpoint(const char *filepath, const char *tag, char *buffer, int buffer_size) {
+    char checkpoint_path[MAX_PATH];
+    snprintf(checkpoint_path, sizeof(checkpoint_path), "%s.checkpoint_%s", filepath, tag);
+    
+    FILE *file = fopen(checkpoint_path, "r");
+    if (!file) return ERR_FILE_NOT_FOUND;
+    
+    size_t bytes_read = fread(buffer, 1, buffer_size - 1, file);
+    buffer[bytes_read] = '\0';
+    
+    fclose(file);
+    return SUCCESS;
+}
+
+int revert_to_checkpoint(const char *filepath, const char *tag) {
+    char checkpoint_path[MAX_PATH];
+    snprintf(checkpoint_path, sizeof(checkpoint_path), "%s.checkpoint_%s", filepath, tag);
+    
+    // Check if checkpoint exists
+    if (access(checkpoint_path, F_OK) != 0) {
+        return ERR_FILE_NOT_FOUND;
+    }
+    
+    // Create backup of current file before reverting
+    if (create_undo_backup(filepath) != 0) {
+        log_formatted(LOG_WARNING, "Could not create undo backup before checkpoint revert");
+    }
+    
+    // Copy checkpoint to original file
+    FILE *src = fopen(checkpoint_path, "r");
+    if (!src) return ERR_FILE_NOT_FOUND;
+    
+    FILE *dst = fopen(filepath, "w");
+    if (!dst) {
+        fclose(src);
+        return ERR_SERVER_ERROR;
+    }
+    
+    char buffer[MAX_BUFFER];
+    size_t bytes;
+    while ((bytes = fread(buffer, 1, sizeof(buffer), src)) > 0) {
+        fwrite(buffer, 1, bytes, dst);
+    }
+    
+    fclose(src);
+    fclose(dst);
+    
+    log_formatted(LOG_INFO, "Reverted %s to checkpoint '%s'", filepath, tag);
+    return SUCCESS;
+}

@@ -50,15 +50,16 @@ void serialize_message(Message *msg, char *buffer) {
     // 10: nm_port (NEW)
     // 11: access
     // 12: target_user
+    // 14: checkpoint stuff
     // 13: data (LAST - can contain anything including |)
     
-    sprintf(buffer, "%d|%d|%s|%s|%s|%s|%d|%d|%d|%d|%d|%d|%s|%s",
+    sprintf(buffer, "%d|%d|%s|%s|%s|%s|%d|%d|%d|%d|%d|%d|%s|%s|%s",
             msg->type,           // 0
             msg->status,         // 1
             msg->sender,         // 2
             msg->filename,       // 3
-            msg->foldername,     // 4 (NEW)
-            msg->target_path,    // 5 (NEW)
+            msg->foldername,     // 4
+            msg->target_path,    // 5
             msg->sentence_index, // 6
             msg->word_index,     // 7
             msg->ss_id,          // 8
@@ -66,7 +67,8 @@ void serialize_message(Message *msg, char *buffer) {
             msg->nm_port,        // 10
             msg->access,         // 11
             msg->target_user,    // 12
-            msg->data);          // 13 (LAST)
+            msg->checkpoint_tag, // 13 (NEW)
+            msg->data);          // 14 (LAST)
 }
 
 void deserialize_message(char *buffer, Message *msg) {
@@ -74,12 +76,12 @@ void deserialize_message(char *buffer, Message *msg) {
     char *p = buffer;
     int field = 0;
 
-    while (field < 14 && p) {  // Changed from 10 to 12
+    while (field < 15 && p) {  // Changed from 10 to 12
         char *sep;
         size_t len;
         
         // CRITICAL: For the last field (data at field 11), take everything remaining
-        if (field == 13) {
+        if (field == 14) {
             sep = NULL;  // No more separators
             len = strlen(p);
         } else {
@@ -123,7 +125,11 @@ void deserialize_message(char *buffer, Message *msg) {
                     strncpy(msg->target_user, token_buf, MAX_USERNAME-1); 
                     msg->target_user[MAX_USERNAME-1] = '\0'; 
                     break;
-                case 13: 
+                case 13:
+                    strncpy(msg->checkpoint_tag, token_buf, MAX_USERNAME-1); 
+                    msg->sender[MAX_USERNAME-1] = '\0'; 
+                    break;
+                case 14: 
                     strncpy(msg->data, token_buf, MAX_BUFFER-1); 
                     msg->data[MAX_BUFFER-1] = '\0'; 
                     break;

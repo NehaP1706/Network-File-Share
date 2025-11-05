@@ -794,6 +794,43 @@ void* handle_nm_communication(void* arg) {
         log_formatted(LOG_REQUEST, "NM request: type=%d, file=%s", msg.type, msg.filename);
         
         switch (msg.type) {
+            case MSG_CHECKPOINT: {
+                char filepath[MAX_PATH];
+                snprintf(filepath, sizeof(filepath), "%s/%s", ss.storage_path, msg.filename);
+                response.status = create_checkpoint(filepath, msg.checkpoint_tag);
+                log_formatted(LOG_INFO, "CHECKPOINT %s tag=%s: status=%d", 
+                             msg.filename, msg.checkpoint_tag, response.status);
+                break;
+            }
+            
+            case MSG_LISTCHECKPOINTS: {
+                char filepath[MAX_PATH];
+                snprintf(filepath, sizeof(filepath), "%s/%s", ss.storage_path, msg.filename);
+                response.status = list_checkpoints(filepath, response.data, MAX_BUFFER);
+                log_formatted(LOG_INFO, "LISTCHECKPOINTS %s: status=%d", 
+                             msg.filename, response.status);
+                break;
+            }
+            
+            case MSG_VIEWCHECKPOINT: {
+                char filepath[MAX_PATH];
+                snprintf(filepath, sizeof(filepath), "%s/%s", ss.storage_path, msg.filename);
+                response.status = view_checkpoint(filepath, msg.checkpoint_tag, 
+                                                   response.data, MAX_BUFFER);
+                log_formatted(LOG_INFO, "VIEWCHECKPOINT %s tag=%s: status=%d", 
+                             msg.filename, msg.checkpoint_tag, response.status);
+                break;
+            }
+            
+            case MSG_REVERT: {
+                char filepath[MAX_PATH];
+                snprintf(filepath, sizeof(filepath), "%s/%s", ss.storage_path, msg.filename);
+                response.status = revert_to_checkpoint(filepath, msg.checkpoint_tag);
+                log_formatted(LOG_INFO, "REVERT %s to tag=%s: status=%d", 
+                             msg.filename, msg.checkpoint_tag, response.status);
+                break;
+            }
+            
             case MSG_CREATEFOLDER:
                 response.status = create_folder_ss(msg.target_path);
                 log_formatted(LOG_INFO, "CREATEFOLDER %s: status=%d", msg.target_path, response.status);

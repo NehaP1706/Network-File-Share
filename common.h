@@ -80,6 +80,10 @@ typedef enum {
     MSG_CREATEFOLDER,     // Create folder
     MSG_MOVE,             // Move file to folder
     MSG_VIEWFOLDER,       // View folder contents
+    MSG_CHECKPOINT,       // Create checkpoint
+    MSG_VIEWCHECKPOINT,   // View checkpoint
+    MSG_REVERT,           // Revert to checkpoint
+    MSG_LISTCHECKPOINTS,  // List checkpoints
     MSG_SS_INFO           // SS requesting file info
 } MessageType;
 
@@ -153,6 +157,7 @@ typedef struct {
     char sender[MAX_USERNAME];
     char filename[MAX_FILENAME];
     char foldername[MAX_FILENAME];
+    char checkpoint_tag[MAX_USERNAME]; 
     char target_path[MAX_PATH];
     char data[MAX_BUFFER];
     int sentence_index;

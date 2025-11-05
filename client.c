@@ -290,6 +290,85 @@ void handle_read(char *filename) {
     close(ss_sock);
 }
 
+void handle_checkpoint(char *filename, char *tag) {
+    Message msg;
+    init_message(&msg);
+    msg.type = MSG_CHECKPOINT;
+    strcpy(msg.sender, client.username);
+    strcpy(msg.filename, filename);
+    strcpy(msg.checkpoint_tag, tag);
+    
+    send_message(client.nm_sock, &msg);
+    
+    Message response;
+    recv_message(client.nm_sock, &response);
+    
+    if (response.status == SUCCESS) {
+        printf("Checkpoint '%s' created successfully!\n", tag);
+    } else {
+        print_error(response.status);
+    }
+}
+
+void handle_viewcheckpoint(char *filename, char *tag) {
+    Message msg;
+    init_message(&msg);
+    msg.type = MSG_VIEWCHECKPOINT;
+    strcpy(msg.sender, client.username);
+    strcpy(msg.filename, filename);
+    strcpy(msg.checkpoint_tag, tag);
+    
+    send_message(client.nm_sock, &msg);
+    
+    Message response;
+    recv_message(client.nm_sock, &response);
+    
+    if (response.status == SUCCESS) {
+        printf("%s\n", response.data);
+    } else {
+        print_error(response.status);
+    }
+}
+
+void handle_revert(char *filename, char *tag) {
+    Message msg;
+    init_message(&msg);
+    msg.type = MSG_REVERT;
+    strcpy(msg.sender, client.username);
+    strcpy(msg.filename, filename);
+    strcpy(msg.checkpoint_tag, tag);
+    
+    send_message(client.nm_sock, &msg);
+    
+    Message response;
+    recv_message(client.nm_sock, &response);
+    
+    if (response.status == SUCCESS) {
+        printf("File reverted to checkpoint '%s' successfully!\n", tag);
+    } else {
+        print_error(response.status);
+    }
+}
+
+void handle_listcheckpoints(char *filename) {
+    Message msg;
+    init_message(&msg);
+    msg.type = MSG_LISTCHECKPOINTS;
+    strcpy(msg.sender, client.username);
+    strcpy(msg.filename, filename);
+    
+    send_message(client.nm_sock, &msg);
+    
+    Message response;
+    recv_message(client.nm_sock, &response);
+    
+    if (response.status == SUCCESS) {
+        printf("Checkpoints for %s:\n%s", filename, response.data);
+    } else {
+        print_error(response.status);
+    }
+}
+
 void handle_create(char *filename) {
     Message msg;
     init_message(&msg);
@@ -821,6 +900,10 @@ void command_loop() {
             printf("  CREATEFOLDER <foldername> [parent_path] - Create new folder\n");
             printf("  MOVE <filename> <foldername> - Move file to folder\n");
             printf("  VIEWFOLDER <foldername>  - View folder contents\n");
+            printf("  CHECKPOINT <filename> <tag> - Create checkpoint\n");
+            printf("  VIEWCHECKPOINT <filename> <tag> - View checkpoint content\n");
+            printf("  REVERT <filename> <tag> - Revert to checkpoint\n");
+            printf("  LISTCHECKPOINTS <filename> - List all checkpoints\n");
             printf("  exit                  - Exit client\n");
         } else if (strcmp(cmd, "VIEW") == 0) {
             handle_view(argc_local > 1 ? tail : NULL);
@@ -903,6 +986,30 @@ void command_loop() {
                 printf("Usage: VIEWFOLDER <foldername>\n");
             } else {
                 handle_viewfolder(argv[1]);
+            }
+        } else if (strcmp(cmd, "CHECKPOINT") == 0) {
+            if (argc_local < 3) {
+                printf("Usage: CHECKPOINT <filename> <tag>\n");
+            } else {
+                handle_checkpoint(argv[1], argv[2]);
+            }
+        } else if (strcmp(cmd, "VIEWCHECKPOINT") == 0) {
+            if (argc_local < 3) {
+                printf("Usage: VIEWCHECKPOINT <filename> <tag>\n");
+            } else {
+                handle_viewcheckpoint(argv[1], argv[2]);
+            }
+        } else if (strcmp(cmd, "REVERT") == 0) {
+            if (argc_local < 3) {
+                printf("Usage: REVERT <filename> <tag>\n");
+            } else {
+                handle_revert(argv[1], argv[2]);
+            }
+        } else if (strcmp(cmd, "LISTCHECKPOINTS") == 0) {
+            if (argc_local < 2) {
+                printf("Usage: LISTCHECKPOINTS <filename>\n");
+            } else {
+                handle_listcheckpoints(argv[1]);
             }
         } else {
             printf("Unknown command: %s\n", cmd);

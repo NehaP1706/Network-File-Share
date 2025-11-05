@@ -55,4 +55,10 @@ int restore_from_undo(const char *filepath);
 // Check if undo backup exists
 int undo_backup_exists(const char *filepath);
 
+// Checkpoint functions
+int create_checkpoint(const char *filepath, const char *tag);
+int list_checkpoints(const char *filepath, char *buffer, int buffer_size);
+int view_checkpoint(const char *filepath, const char *tag, char *buffer, int buffer_size);
+int revert_to_checkpoint(const char *filepath, const char *tag);
+
 #endif // FILE_OPS_H

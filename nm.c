@@ -369,6 +369,52 @@ void handle_viewfolder(int client_sock, Message *msg) {
     send_message(client_sock, &response);
 }
 
+void handle_checkpoint_request(int client_sock, Message *msg) {
+    Message response;
+    init_message(&response);
+    
+    // Check write access
+    if (!check_access(msg->filename, msg->sender, ACCESS_WRITE)) {
+        response.status = ERR_ACCESS_DENIED;
+        send_message(client_sock, &response);
+        return;
+    }
+    
+    int ss_id = find_ss_for_file(msg->filename);
+    if (ss_id < 0) {
+        response.status = ERR_FILE_NOT_FOUND;
+        send_message(client_sock, &response);
+        return;
+    }
+    
+    pthread_mutex_lock(&nm.ss_mutex);
+    int ss_idx = -1;
+    for (int i = 0; i < nm.ss_count; i++) {
+        if (nm.ss_list[i].id == ss_id && nm.ss_list[i].active) {
+            ss_idx = i;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&nm.ss_mutex);
+    
+    if (ss_idx < 0) {
+        response.status = ERR_SS_UNAVAILABLE;
+        send_message(client_sock, &response);
+        return;
+    }
+    
+    // Forward to SS
+    pthread_mutex_lock(&nm.ss_sock_mutexes[ss_idx]);
+    send_message(nm.ss_list[ss_idx].sock, msg);
+    recv_message(nm.ss_list[ss_idx].sock, &response);
+    pthread_mutex_unlock(&nm.ss_sock_mutexes[ss_idx]);
+    
+    send_message(client_sock, &response);
+    
+    log_formatted(LOG_INFO, "Checkpoint operation type=%d for %s by %s", 
+                 msg->type, msg->filename, msg->sender);
+}
+
 void handle_view(int client_sock, Message *msg) {
     int show_all = 0;
     int show_details = 0;
@@ -1155,6 +1201,12 @@ void* handle_client_connection(void* arg) {
                      msg.sender, msg.type, msg.filename);
         
         switch (msg.type) {
+            case MSG_CHECKPOINT:
+            case MSG_VIEWCHECKPOINT:
+            case MSG_REVERT:
+            case MSG_LISTCHECKPOINTS:
+                handle_checkpoint_request(client_sock, &msg);
+                break;
             case MSG_CREATEFOLDER:
                 handle_createfolder(client_sock, &msg);
                 break;
