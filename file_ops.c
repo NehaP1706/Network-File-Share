@@ -297,6 +297,7 @@ int insert_word_in_sentence(FileContent *fc, int sent_idx, int word_idx, const c
             return -1;
         }
         /* actually add the sentence to the count so subsequent code can use it */
+        if(!(fc->sentence_count==1 && fc->sentences[0].word_count==0)) // Special case: if file was empty with one empty sentence, don't count it - S
         fc->sentence_count++;
     }
     
