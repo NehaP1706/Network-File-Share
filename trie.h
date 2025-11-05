@@ -16,6 +16,18 @@ typedef struct {
     pthread_rwlock_t lock;
 } Trie;
 
+typedef struct {
+    TrieNode *root;
+    pthread_rwlock_t lock;
+} FolderTrie;
+
+// Add function declarations:
+FolderTrie* init_folder_trie();
+void free_folder_trie(FolderTrie *trie);
+int folder_trie_insert(FolderTrie *trie, const char *path, FolderMetadata *meta);
+FolderMetadata* folder_trie_search(FolderTrie *trie, const char *path);
+int folder_trie_delete(FolderTrie *trie, const char *path);
+
 // Initialize trie
 Trie* init_trie();
 

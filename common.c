@@ -41,28 +41,32 @@ void serialize_message(Message *msg, char *buffer) {
     // 1: status
     // 2: sender
     // 3: filename
-    // 4: sentence_index
-    // 5: word_index
-    // 6: ss_id
-    // 7: client_port (NEW)
-    // 8: nm_port (NEW)
-    // 9: access
-    // 10: target_user
-    // 11: data (LAST - can contain anything including |)
+    // 4: foldername
+    // 5: target_path
+    // 6: sentence_index
+    // 7: word_index
+    // 8: ss_id
+    // 9: client_port (NEW)
+    // 10: nm_port (NEW)
+    // 11: access
+    // 12: target_user
+    // 13: data (LAST - can contain anything including |)
     
-    sprintf(buffer, "%d|%d|%s|%s|%d|%d|%d|%d|%d|%d|%s|%s",
+    sprintf(buffer, "%d|%d|%s|%s|%s|%s|%d|%d|%d|%d|%d|%d|%s|%s",
             msg->type,           // 0
             msg->status,         // 1
             msg->sender,         // 2
             msg->filename,       // 3
-            msg->sentence_index, // 4
-            msg->word_index,     // 5
-            msg->ss_id,          // 6
-            msg->client_port,    // 7 (NEW)
-            msg->nm_port,        // 8 (NEW)
-            msg->access,         // 9
-            msg->target_user,    // 10
-            msg->data);          // 11 (LAST)
+            msg->foldername,     // 4 (NEW)
+            msg->target_path,    // 5 (NEW)
+            msg->sentence_index, // 6
+            msg->word_index,     // 7
+            msg->ss_id,          // 8
+            msg->client_port,    // 9
+            msg->nm_port,        // 10
+            msg->access,         // 11
+            msg->target_user,    // 12
+            msg->data);          // 13 (LAST)
 }
 
 void deserialize_message(char *buffer, Message *msg) {
@@ -70,12 +74,12 @@ void deserialize_message(char *buffer, Message *msg) {
     char *p = buffer;
     int field = 0;
 
-    while (field < 12 && p) {  // Changed from 10 to 12
+    while (field < 14 && p) {  // Changed from 10 to 12
         char *sep;
         size_t len;
         
         // CRITICAL: For the last field (data at field 11), take everything remaining
-        if (field == 11) {
+        if (field == 13) {
             sep = NULL;  // No more separators
             len = strlen(p);
         } else {
@@ -101,17 +105,25 @@ void deserialize_message(char *buffer, Message *msg) {
                     strncpy(msg->filename, token_buf, MAX_FILENAME-1); 
                     msg->filename[MAX_FILENAME-1] = '\0'; 
                     break;
-                case 4: msg->sentence_index = atoi(token_buf); break;
-                case 5: msg->word_index = atoi(token_buf); break;
-                case 6: msg->ss_id = atoi(token_buf); break;
-                case 7: msg->client_port = atoi(token_buf); break;  // NEW
-                case 8: msg->nm_port = atoi(token_buf); break;      // NEW
-                case 9: msg->access = atoi(token_buf); break;
-                case 10: 
+                case 4:
+                    strncpy(msg->foldername, token_buf, MAX_FILENAME-1); 
+                    msg->filename[MAX_FILENAME-1] = '\0'; 
+                    break; 
+                case 5:
+                    strncpy(msg->target_path, token_buf, MAX_FILENAME-1); 
+                    msg->filename[MAX_FILENAME-1] = '\0'; 
+                    break; 
+                case 6: msg->sentence_index = atoi(token_buf); break;
+                case 7: msg->word_index = atoi(token_buf); break;
+                case 8: msg->ss_id = atoi(token_buf); break;
+                case 9: msg->client_port = atoi(token_buf); break;  // NEW
+                case 10: msg->nm_port = atoi(token_buf); break;      // NEW
+                case 11: msg->access = atoi(token_buf); break;
+                case 12: 
                     strncpy(msg->target_user, token_buf, MAX_USERNAME-1); 
                     msg->target_user[MAX_USERNAME-1] = '\0'; 
                     break;
-                case 11: 
+                case 13: 
                     strncpy(msg->data, token_buf, MAX_BUFFER-1); 
                     msg->data[MAX_BUFFER-1] = '\0'; 
                     break;

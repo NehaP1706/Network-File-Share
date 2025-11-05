@@ -463,6 +463,71 @@ int unlock_sentence_ss(const char *filename, int sent_idx, const char *username)
     return SUCCESS;
 }
 
+int create_folder_ss(const char *folder_path) {
+    char full_path[MAX_PATH];
+    snprintf(full_path, sizeof(full_path), "%s%s", ss.storage_path, folder_path);
+    
+    struct stat st = {0};
+    if (stat(full_path, &st) == 0) {
+        return ERR_FILE_EXISTS;
+    }
+    
+    // Create folder recursively
+    char tmp[MAX_PATH];
+    char *p = NULL;
+    size_t len;
+    
+    snprintf(tmp, sizeof(tmp), "%s", full_path);
+    len = strlen(tmp);
+    if (tmp[len - 1] == '/')
+        tmp[len - 1] = 0;
+        
+    for (p = tmp + 1; *p; p++) {
+        if (*p == '/') {
+            *p = 0;
+            mkdir(tmp, 0777);
+            *p = '/';
+        }
+    }
+    mkdir(tmp, 0777);
+    
+    log_formatted(LOG_INFO, "Created folder: %s", folder_path);
+    return SUCCESS;
+}
+
+int move_file_ss(const char *filename, const char *old_path, const char *new_path) {
+    char old_full[MAX_PATH], new_full[MAX_PATH];
+    
+    // Handle old path (empty means root)
+    if (strlen(old_path) > 0 && strcmp(old_path, "/") != 0) {
+        snprintf(old_full, sizeof(old_full), "%s%s/%s", ss.storage_path, old_path, filename);
+    } else {
+        snprintf(old_full, sizeof(old_full), "%s/%s", ss.storage_path, filename);
+    }
+    
+    // Handle new path (empty means root)
+    if (strlen(new_path) > 0 && strcmp(new_path, "/") != 0) {
+        snprintf(new_full, sizeof(new_full), "%s%s/%s", ss.storage_path, new_path, filename);
+    } else {
+        snprintf(new_full, sizeof(new_full), "%s/%s", ss.storage_path, filename);
+    }
+    
+    if (rename(old_full, new_full) != 0) {
+        log_formatted(LOG_ERROR, "Failed to move %s to %s: %s", 
+                     old_full, new_full, strerror(errno));
+        return ERR_SERVER_ERROR;
+    }
+    
+    // Move undo file too if it exists
+    char old_undo[MAX_PATH], new_undo[MAX_PATH];
+    snprintf(old_undo, sizeof(old_undo), "%s.undo", old_full);
+    snprintf(new_undo, sizeof(new_undo), "%s.undo", new_full);
+    rename(old_undo, new_undo);  // Ignore error if doesn't exist
+    
+    log_formatted(LOG_INFO, "Moved file %s from %s to %s", filename, old_full, new_full);
+    return SUCCESS;
+}
+
 int stream_file_ss(int client_sock, const char *filename) {
     char filepath[MAX_PATH];
     snprintf(filepath, sizeof(filepath), "%s/%s", ss.storage_path, filename);
@@ -696,7 +761,7 @@ void* handle_nm_communication(void* arg) {
     
     // Set a reasonable timeout so we don't block forever
     struct timeval tv;
-    tv.tv_sec = 1;  // 1 second timeout for receives
+    tv.tv_sec = 30;  // 1 second timeout for receives
     tv.tv_usec = 0;
     setsockopt(ss.nm_sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
     
@@ -729,6 +794,17 @@ void* handle_nm_communication(void* arg) {
         log_formatted(LOG_REQUEST, "NM request: type=%d, file=%s", msg.type, msg.filename);
         
         switch (msg.type) {
+            case MSG_CREATEFOLDER:
+                response.status = create_folder_ss(msg.target_path);
+                log_formatted(LOG_INFO, "CREATEFOLDER %s: status=%d", msg.target_path, response.status);
+                break;
+                
+            case MSG_MOVE:
+                response.status = move_file_ss(msg.filename, msg.data, msg.target_path);
+                log_formatted(LOG_INFO, "MOVE %s to %s: status=%d", 
+                             msg.filename, msg.target_path, response.status);
+                break;
+
             case MSG_CREATE:
                 response.status = create_file_ss(msg.filename);
                 log_formatted(LOG_INFO, "CREATE %s: status=%d", msg.filename, response.status);

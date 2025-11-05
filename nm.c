@@ -12,6 +12,7 @@
 
 typedef struct {
     Trie *file_trie;
+    FolderTrie *folder_trie;
     LRUCache *cache;
     
     StorageServerInfo ss_list[MAX_SS];
@@ -55,6 +56,7 @@ void* handle_ss_heartbeat(void* arg);
 
 void init_name_server() {
     nm.file_trie = init_trie();
+    nm.folder_trie = init_folder_trie();
     nm.cache = init_cache(CACHE_SIZE);
     nm.ss_count = 0;
     nm.client_count = 0;
@@ -139,6 +141,232 @@ int check_access(const char *filename, const char *username, AccessType required
     
     free(meta);
     return 0;
+}
+
+void handle_createfolder(int client_sock, Message *msg) {
+    Message response;
+    init_message(&response);
+    
+    // Build full path
+    char full_path[MAX_PATH];
+    if (strlen(msg->target_path) > 0) {
+        snprintf(full_path, sizeof(full_path), "%s/%s", msg->target_path, msg->foldername);
+    } else {
+        snprintf(full_path, sizeof(full_path), "/%s", msg->foldername);
+    }
+    
+    // Check if folder exists
+    FolderMetadata *existing = folder_trie_search(nm.folder_trie, full_path);
+    if (existing) {
+        free(existing);
+        response.status = ERR_FILE_EXISTS;
+        send_message(client_sock, &response);
+        return;
+    }
+    
+    // Get SS for folder
+    int ss_id = get_next_ss_round_robin();
+    if (ss_id < 0) {
+        response.status = ERR_SS_UNAVAILABLE;
+        send_message(client_sock, &response);
+        return;
+    }
+    
+    // Forward to SS
+    pthread_mutex_lock(&nm.ss_mutex);
+    int ss_idx = -1;
+    for (int i = 0; i < nm.ss_count; i++) {
+        if (nm.ss_list[i].id == ss_id && nm.ss_list[i].active) {
+            ss_idx = i;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&nm.ss_mutex);
+    
+    if (ss_idx < 0) {
+        response.status = ERR_SS_UNAVAILABLE;
+        send_message(client_sock, &response);
+        return;
+    }
+    
+    Message ss_msg;
+    init_message(&ss_msg);
+    ss_msg.type = MSG_CREATEFOLDER;
+    strcpy(ss_msg.foldername, msg->foldername);
+    strcpy(ss_msg.target_path, full_path);
+    
+    pthread_mutex_lock(&nm.ss_sock_mutexes[ss_idx]);
+    send_message(nm.ss_list[ss_idx].sock, &ss_msg);
+    
+    Message ss_response;
+    recv_message(nm.ss_list[ss_idx].sock, &ss_response);
+    pthread_mutex_unlock(&nm.ss_sock_mutexes[ss_idx]);
+    
+    if (ss_response.status == SUCCESS) {
+        // Add to folder trie
+        FolderMetadata folder_meta;
+        memset(&folder_meta, 0, sizeof(FolderMetadata));
+        strcpy(folder_meta.foldername, msg->foldername);
+        strcpy(folder_meta.parent_path, msg->target_path);
+        strcpy(folder_meta.owner, msg->sender);
+        folder_meta.created = time(NULL);
+        folder_meta.ss_id = ss_id;
+        folder_meta.acl_count = 0;
+        
+        folder_trie_insert(nm.folder_trie, full_path, &folder_meta);
+        response.status = SUCCESS;
+        log_formatted(LOG_INFO, "Created folder %s by %s on SS %d", 
+                     full_path, msg->sender, ss_id);
+    } else {
+        response.status = ss_response.status;
+    }
+    
+    send_message(client_sock, &response);
+}
+
+void handle_move(int client_sock, Message *msg) {
+    Message response;
+    init_message(&response);
+    
+    // Check if file exists
+    FileMetadata *file_meta = trie_search(nm.file_trie, msg->filename);
+    if (!file_meta) {
+        response.status = ERR_FILE_NOT_FOUND;
+        send_message(client_sock, &response);
+        return;
+    }
+    
+    // Check permissions
+    if (strcmp(file_meta->owner, msg->sender) != 0 && 
+        !check_access(msg->filename, msg->sender, ACCESS_WRITE)) {
+        free(file_meta);
+        response.status = ERR_ACCESS_DENIED;
+        send_message(client_sock, &response);
+        return;
+    }
+    
+    // Check if target folder exists (unless moving to root)
+    if (strlen(msg->target_path) > 0 && strcmp(msg->target_path, "/") != 0) {
+        FolderMetadata *folder_meta = folder_trie_search(nm.folder_trie, msg->target_path);
+        if (!folder_meta) {
+            free(file_meta);
+            response.status = ERR_FILE_NOT_FOUND;
+            send_message(client_sock, &response);
+            return;
+        }
+        free(folder_meta);
+    }
+    
+    int ss_id = file_meta->ss_id;
+    
+    // Forward to SS
+    pthread_mutex_lock(&nm.ss_mutex);
+    int ss_idx = -1;
+    for (int i = 0; i < nm.ss_count; i++) {
+        if (nm.ss_list[i].id == ss_id && nm.ss_list[i].active) {
+            ss_idx = i;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&nm.ss_mutex);
+    
+    if (ss_idx < 0) {
+        free(file_meta);
+        response.status = ERR_SS_UNAVAILABLE;
+        send_message(client_sock, &response);
+        return;
+    }
+    
+    Message ss_msg;
+    init_message(&ss_msg);
+    ss_msg.type = MSG_MOVE;
+    strcpy(ss_msg.filename, msg->filename);
+    strcpy(ss_msg.target_path, msg->target_path);
+    strcpy(ss_msg.data, file_meta->folder_path);  // Old path (may be empty for root)
+    
+    pthread_mutex_lock(&nm.ss_sock_mutexes[ss_idx]);
+    send_message(nm.ss_list[ss_idx].sock, &ss_msg);
+    
+    Message ss_response;
+    recv_message(nm.ss_list[ss_idx].sock, &ss_response);
+    pthread_mutex_unlock(&nm.ss_sock_mutexes[ss_idx]);
+    
+    if (ss_response.status == SUCCESS) {
+        // Update file metadata with new path
+        strcpy(file_meta->folder_path, msg->target_path);
+        trie_update(nm.file_trie, msg->filename, file_meta);
+        cache_put(nm.cache, msg->filename, file_meta);
+        response.status = SUCCESS;
+        log_formatted(LOG_INFO, "Moved file %s from '%s' to '%s'", 
+                     msg->filename, 
+                     strlen(ss_msg.data) > 0 ? ss_msg.data : "(root)",
+                     strlen(msg->target_path) > 0 ? msg->target_path : "(root)");
+    } else {
+        response.status = ss_response.status;
+    }
+    
+    free(file_meta);
+    send_message(client_sock, &response);
+}
+
+void handle_viewfolder(int client_sock, Message *msg) {
+    Message response;
+    init_message(&response);
+    response.type = MSG_DATA;
+    
+    // Check if we're viewing root (empty path) or a specific folder
+    int viewing_root = (strlen(msg->target_path) == 0 || strcmp(msg->target_path, "/") == 0);
+    printf("ROOT? : %d\n", viewing_root);
+
+    if (!viewing_root) {
+        // Check if folder exists
+        printf("Fetching folder data.....\n");
+        FolderMetadata *folder_meta = folder_trie_search(nm.folder_trie, msg->target_path);
+        if (!folder_meta) {
+            response.status = ERR_FILE_NOT_FOUND;
+            send_message(client_sock, &response);
+            free(folder_meta);
+            return;
+        }
+    }
+    
+    // Get all files
+    printf("Fetching all files....\n");
+    FileMetadata *files[MAX_FILES];
+    int file_count = trie_get_all_files(nm.file_trie, files, MAX_FILES);
+    printf("Found %d files!\n", file_count);
+    
+    char buffer[MAX_BUFFER] = "";
+    int pos = 0;
+    
+    // Filter files in this folder
+    for (int i = 0; i < file_count; i++) {
+        int matches = 0;
+        
+        if (viewing_root) {
+            // Show files with empty folder_path
+            matches = (strlen(files[i]->folder_path) == 0);
+        } else {
+            // Show files in specified folder
+            printf("Found match!\n");
+            matches = (strcmp(files[i]->folder_path, msg->target_path) == 0);
+        }
+        
+        if (matches && check_access(files[i]->filename, msg->sender, ACCESS_READ)) {
+            pos += snprintf(buffer + pos, MAX_BUFFER - pos, "%s\n", files[i]->filename);
+        }
+        free(files[i]);
+    }
+    
+    if (pos == 0) {
+        strcpy(buffer, "(empty folder)\n");
+    }
+    
+    strncpy(response.data, buffer, MAX_BUFFER - 1);
+    response.status = SUCCESS;
+    printf("Setting status to success...\n");
+    printf("Created response: %s\n", response.data);
+    send_message(client_sock, &response);
 }
 
 void handle_view(int client_sock, Message *msg) {
@@ -417,6 +645,7 @@ void handle_create(int client_sock, Message *msg) {
         FileMetadata meta;
         memset(&meta, 0, sizeof(FileMetadata));
         strcpy(meta.filename, msg->filename);
+        meta.folder_path[0] = '\0';
         strcpy(meta.owner, msg->sender);
         meta.ss_id = ss_id;
         meta.created = time(NULL);
@@ -848,31 +1077,31 @@ void* handle_ss_connection(void* arg) {
     nm.ss_list[idx].last_heartbeat = time(NULL); // Moved here to give more time for the heartbeat and initialization - N
     
     int my_ss_id = msg.ss_id;
-    nm.ss_count++;
+    // nm.ss_count++;
     pthread_mutex_unlock(&nm.ss_mutex);
     
     log_formatted(LOG_INFO, "SS %d registered with %d files", 
                  msg.ss_id, nm.ss_list[idx].file_count);
     printf("[NM] Storage Server %d connected from %s\n", msg.ss_id, msg.sender);
     
-        while (nm.running) {
-            pthread_mutex_lock(&nm.ss_mutex);
-            int still_active = 0;
-            for (int i = 0; i < nm.ss_count; i++) {
-                if (nm.ss_list[i].id == my_ss_id) {
-                    still_active = nm.ss_list[i].active;
-                    break;
-                }
-            }
-            pthread_mutex_unlock(&nm.ss_mutex);
-            
-            if (!still_active) {
-                log_formatted(LOG_INFO, "SS %d marked inactive by heartbeat monitor", my_ss_id);
+    while (nm.running) {
+        pthread_mutex_lock(&nm.ss_mutex);
+        int still_active = 0;
+        for (int i = 0; i < nm.ss_count; i++) {
+            if (nm.ss_list[i].id == my_ss_id) {
+                still_active = nm.ss_list[i].active;
                 break;
             }
-            
-            sleep(3); // I set it to 3, we can decide on a suitable value later - N
         }
+        pthread_mutex_unlock(&nm.ss_mutex);
+            
+        if (!still_active) {
+            log_formatted(LOG_INFO, "SS %d marked inactive by heartbeat monitor", my_ss_id);
+            break;
+        }
+            
+        sleep(3); // I set it to 3, we can decide on a suitable value later - N
+    }
         
     // Cleanup when heartbeat declares it dead
     close(ss_sock);
@@ -926,6 +1155,15 @@ void* handle_client_connection(void* arg) {
                      msg.sender, msg.type, msg.filename);
         
         switch (msg.type) {
+            case MSG_CREATEFOLDER:
+                handle_createfolder(client_sock, &msg);
+                break;
+            case MSG_MOVE:
+                handle_move(client_sock, &msg);
+                break;
+            case MSG_VIEWFOLDER:
+                handle_viewfolder(client_sock, &msg);
+                break;
             case MSG_VIEW:
                 handle_view(client_sock, &msg);
                 break;
@@ -1095,9 +1333,9 @@ void* heartbeat_monitor(void* arg) {
             if (nm.ss_list[i].active) {
                 time_t idle = now - nm.ss_list[i].last_heartbeat;
                 
-                // Give extra grace period (30 seconds) for initial connection - N
+                // Give extra grace period (60 seconds) for initial connection - N
                 // The grace value can be adjusted as needed - N
-                int timeout = (idle < 30) ? 30 : HEARTBEAT_TIMEOUT;
+                int timeout = (idle < 60) ? 60 : HEARTBEAT_TIMEOUT;
                 
                 if (idle > timeout) {
                     log_formatted(LOG_WARNING, "SS %d heartbeat timeout (last: %ld sec ago)", 

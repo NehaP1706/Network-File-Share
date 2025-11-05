@@ -199,3 +199,74 @@ int trie_get_all_files(Trie *trie, FileMetadata **files, int max_files) {
     pthread_rwlock_unlock(&trie->lock);
     return count;
 }
+
+FolderTrie* init_folder_trie() {
+    FolderTrie *trie = malloc(sizeof(FolderTrie));
+    trie->root = create_trie_node();
+    pthread_rwlock_init(&trie->lock, NULL);
+    return trie;
+}
+
+void free_folder_trie(FolderTrie *trie) {
+    if (!trie) return;
+    free_trie_node(trie->root);
+    pthread_rwlock_destroy(&trie->lock);
+    free(trie);
+}
+
+int folder_trie_insert(FolderTrie *trie, const char *path, FolderMetadata *meta) {
+    pthread_rwlock_wrlock(&trie->lock);
+    
+    TrieNode *current = trie->root;
+    for (int i = 0; path[i] != '\0'; i++) {
+        int index = (unsigned char)path[i];
+        if (index >= ALPHABET_SIZE) {
+            pthread_rwlock_unlock(&trie->lock);
+            return -1;
+        }
+        if (!current->children[index]) {
+            current->children[index] = create_trie_node();
+        }
+        current = current->children[index];
+    }
+    
+    current->is_end_of_word = 1;
+    if (!current->file_meta) {
+        current->file_meta = malloc(sizeof(FileMetadata));
+    }
+    // Store folder metadata in file_meta (we'll reuse the structure)
+    memcpy(current->file_meta, meta, sizeof(FolderMetadata));
+    
+    pthread_rwlock_unlock(&trie->lock);
+    return 0;
+}
+
+FolderMetadata* folder_trie_search(FolderTrie *trie, const char *path) {
+    pthread_rwlock_rdlock(&trie->lock);
+    
+    TrieNode *current = trie->root;
+    for (int i = 0; path[i] != '\0'; i++) {
+        int index = (unsigned char)path[i];
+        if (index >= ALPHABET_SIZE || !current->children[index]) {
+            pthread_rwlock_unlock(&trie->lock);
+            return NULL;
+        }
+        current = current->children[index];
+    }
+    
+    FolderMetadata *result = NULL;
+    if (current && current->is_end_of_word && current->file_meta) {
+        result = malloc(sizeof(FolderMetadata));
+        memcpy(result, current->file_meta, sizeof(FolderMetadata));
+    }
+    
+    pthread_rwlock_unlock(&trie->lock);
+    return result;
+}
+
+int folder_trie_delete(FolderTrie *trie, const char *path) {
+    pthread_rwlock_wrlock(&trie->lock);
+    trie_delete_helper(trie->root, path, 0);
+    pthread_rwlock_unlock(&trie->lock);
+    return 0;
+}

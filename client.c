@@ -162,6 +162,69 @@ int connect_to_ss(const char *ss_info) {
     return ss_sock;
 }
 
+void handle_createfolder(char *foldername, char *parent_path) {
+    Message msg;
+    init_message(&msg);
+    msg.type = MSG_CREATEFOLDER;
+    strcpy(msg.sender, client.username);
+    strcpy(msg.foldername, foldername);
+    if (parent_path) {
+        strcpy(msg.target_path, parent_path);
+    } else {
+        msg.target_path[0] = '\0';
+    }
+    
+    send_message(client.nm_sock, &msg);
+    
+    Message response;
+    recv_message(client.nm_sock, &response);
+    
+    if (response.status == SUCCESS) {
+        printf("Folder created successfully!\n");
+    } else {
+        print_error(response.status);
+    }
+}
+
+void handle_move_file(char *filename, char *foldername) {
+    Message msg;
+    init_message(&msg);
+    msg.type = MSG_MOVE;
+    strcpy(msg.sender, client.username);
+    strcpy(msg.filename, filename);
+    strcpy(msg.target_path, foldername);
+    
+    send_message(client.nm_sock, &msg);
+    
+    Message response;
+    recv_message(client.nm_sock, &response);
+    
+    if (response.status == SUCCESS) {
+        printf("File moved successfully!\n");
+    } else {
+        print_error(response.status);
+    }
+}
+
+void handle_viewfolder(char *foldername) {
+    Message msg;
+    init_message(&msg);
+    msg.type = MSG_VIEWFOLDER;
+    strcpy(msg.sender, client.username);
+    strcpy(msg.target_path, foldername);
+    
+    send_message(client.nm_sock, &msg);
+    
+    Message response;
+    recv_message(client.nm_sock, &response);
+
+    if (response.status == SUCCESS) {
+        printf("%s", response.data);
+    } else {
+        print_error(response.status);
+    }
+}
+
 void handle_view(char *args) {
     Message msg;
     init_message(&msg);
@@ -755,6 +818,9 @@ void command_loop() {
             printf("  REMACCESS <filename> <username> - Remove access\n");
             printf("  EXEC <filename>       - Execute file as commands\n");
             printf("  UNDO <filename>       - Undo last change\n");
+            printf("  CREATEFOLDER <foldername> [parent_path] - Create new folder\n");
+            printf("  MOVE <filename> <foldername> - Move file to folder\n");
+            printf("  VIEWFOLDER <foldername>  - View folder contents\n");
             printf("  exit                  - Exit client\n");
         } else if (strcmp(cmd, "VIEW") == 0) {
             handle_view(argc_local > 1 ? tail : NULL);
@@ -819,6 +885,24 @@ void command_loop() {
                 printf("Usage: UNDO <filename>\n");
             } else {
                 handle_undo(argv[1]);
+            }
+        } else if (strcmp(cmd, "CREATEFOLDER") == 0) {
+            if (argc_local < 2) {
+                printf("Usage: CREATEFOLDER <foldername> [parent_path]\n");
+            } else {
+                handle_createfolder(argv[1], argc_local > 2 ? argv[2] : NULL);
+            }
+        } else if (strcmp(cmd, "MOVE") == 0) {
+            if (argc_local < 3) {
+                printf("Usage: MOVE <filename> <foldername>\n");
+            } else {
+                handle_move_file(argv[1], argv[2]);
+            }
+        } else if (strcmp(cmd, "VIEWFOLDER") == 0) {
+            if (argc_local < 2) {
+                printf("Usage: VIEWFOLDER <foldername>\n");
+            } else {
+                handle_viewfolder(argv[1]);
             }
         } else {
             printf("Unknown command: %s\n", cmd);

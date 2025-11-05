@@ -77,6 +77,9 @@ typedef enum {
     MSG_DATA,             // Data transfer
     MSG_ERROR,            // Error message
     MSG_STOP,             // Stop signal
+    MSG_CREATEFOLDER,     // Create folder
+    MSG_MOVE,             // Move file to folder
+    MSG_VIEWFOLDER,       // View folder contents
     MSG_SS_INFO           // SS requesting file info
 } MessageType;
 
@@ -97,6 +100,7 @@ typedef struct {
 // File Metadata
 typedef struct {
     char filename[MAX_FILENAME];
+    char folder_path[MAX_PATH];
     char owner[MAX_USERNAME];
     int ss_id;  // Storage Server ID
     size_t size;
@@ -109,6 +113,16 @@ typedef struct {
     ACLEntry acl[MAX_ACL_ENTRIES];
     int acl_count;
 } FileMetadata;
+
+typedef struct {
+    char foldername[MAX_FILENAME];
+    char parent_path[MAX_PATH];  // Full path to parent folder
+    char owner[MAX_USERNAME];
+    time_t created;
+    int ss_id;
+    ACLEntry acl[MAX_ACL_ENTRIES];
+    int acl_count;
+} FolderMetadata;
 
 // Storage Server Info
 typedef struct {
@@ -138,6 +152,8 @@ typedef struct {
     int status;
     char sender[MAX_USERNAME];
     char filename[MAX_FILENAME];
+    char foldername[MAX_FILENAME];
+    char target_path[MAX_PATH];
     char data[MAX_BUFFER];
     int sentence_index;
     int word_index;
@@ -165,5 +181,6 @@ void deserialize_message(char *buffer, Message *msg);
 char* get_timestamp();
 void trim_whitespace(char *str);
 int set_socket_timeouts(int sock, int send_timeout_sec, int recv_timeout_sec); // Added definition - N
+
 
 #endif // COMMON_H
