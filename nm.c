@@ -29,6 +29,10 @@ typedef struct {
     int ss_hb_sock;            // heartbeat listener - N
     int client_sock;
     volatile int running;
+
+    AccessRequest access_requests[MAX_FILES * 10];  // Queue of access requests
+    int request_count;
+    pthread_mutex_t request_mutex;
 } NameServer;
 
 NameServer nm;
@@ -65,6 +69,8 @@ void init_name_server() {
     
     pthread_mutex_init(&nm.ss_mutex, NULL);
     pthread_mutex_init(&nm.client_mutex, NULL);
+    pthread_mutex_init(&nm.request_mutex, NULL);
+    nm.request_count = 0;
     
     // ADD: Initialize per-SS socket mutexes - N
     for (int i = 0; i < MAX_SS; i++) {
@@ -221,6 +227,208 @@ void handle_createfolder(int client_sock, Message *msg) {
         response.status = ss_response.status;
     }
     
+    send_message(client_sock, &response);
+}
+
+void handle_requestaccess(int client_sock, Message *msg) {
+    Message response;
+    init_message(&response);
+    
+    // Check if file exists
+    FileMetadata *meta = trie_search(nm.file_trie, msg->filename);
+    if (!meta) {
+        response.status = ERR_FILE_NOT_FOUND;
+        send_message(client_sock, &response);
+        return;
+    }
+    
+    // Check if user already has access
+    if (check_access(msg->filename, msg->sender, msg->access)) {
+        free(meta);
+        response.status = SUCCESS;
+        strcpy(response.data, "You already have this access");
+        send_message(client_sock, &response);
+        return;
+    }
+    
+    // Check if request already exists
+    pthread_mutex_lock(&nm.request_mutex);
+    for (int i = 0; i < nm.request_count; i++) {
+        if (strcmp(nm.access_requests[i].username, msg->sender) == 0 &&
+            strcmp(nm.access_requests[i].filename, msg->filename) == 0) {
+            pthread_mutex_unlock(&nm.request_mutex);
+            free(meta);
+            response.status = SUCCESS;
+            strcpy(response.data, "Request already pending");
+            send_message(client_sock, &response);
+            return;
+        }
+    }
+    
+    // Add new request
+    if (nm.request_count < MAX_FILES * 10) {
+        strcpy(nm.access_requests[nm.request_count].username, msg->sender);
+        strcpy(nm.access_requests[nm.request_count].filename, msg->filename);
+        nm.access_requests[nm.request_count].requested_access = msg->access;
+        nm.access_requests[nm.request_count].request_time = time(NULL);
+        nm.request_count++;
+        response.status = SUCCESS;
+        log_formatted(LOG_INFO, "Access request from %s for %s (access type: %d)", 
+                     msg->sender, msg->filename, msg->access);
+    } else {
+        response.status = ERR_SERVER_ERROR;
+        strcpy(response.data, "Request queue full");
+    }
+    
+    pthread_mutex_unlock(&nm.request_mutex);
+    free(meta);
+    send_message(client_sock, &response);
+}
+
+void handle_viewrequests(int client_sock, Message *msg) {
+    Message response;
+    init_message(&response);
+    response.type = MSG_DATA;
+    
+    char buffer[MAX_BUFFER] = "";
+    int pos = 0;
+    int found = 0;
+    
+    pthread_mutex_lock(&nm.request_mutex);
+    
+    for (int i = 0; i < nm.request_count; i++) {
+        // Check if sender owns the file
+        FileMetadata *meta = trie_search(nm.file_trie, nm.access_requests[i].filename);
+        if (meta && strcmp(meta->owner, msg->sender) == 0) {
+            found = 1;
+            char time_str[32];
+            struct tm *tm_info = localtime(&nm.access_requests[i].request_time);
+            strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", tm_info);
+            
+            const char *access_str = (nm.access_requests[i].requested_access == ACCESS_READ) ? "READ" : "WRITE";
+            
+            pos += snprintf(buffer + pos, MAX_BUFFER - pos, 
+                          "[%d] User: %s, File: %s, Access: %s, Time: %s\n",
+                          i, nm.access_requests[i].username, 
+                          nm.access_requests[i].filename,
+                          access_str, time_str);
+        }
+        if (meta) free(meta);
+    }
+    
+    pthread_mutex_unlock(&nm.request_mutex);
+    
+    if (!found) {
+        strcpy(buffer, "No pending access requests for your files.\n");
+    }
+    
+    strncpy(response.data, buffer, MAX_BUFFER - 1);
+    response.status = SUCCESS;
+    send_message(client_sock, &response);
+}
+
+void handle_approverequest(int client_sock, Message *msg) {
+    Message response;
+    init_message(&response);
+    
+    int request_id = msg->sentence_index;  // Reuse field for request ID
+    
+    pthread_mutex_lock(&nm.request_mutex);
+    
+    if (request_id < 0 || request_id >= nm.request_count) {
+        pthread_mutex_unlock(&nm.request_mutex);
+        response.status = ERR_INVALID_INDEX;
+        send_message(client_sock, &response);
+        return;
+    }
+    
+    AccessRequest *req = &nm.access_requests[request_id];
+    
+    // Verify ownership
+    FileMetadata *meta = trie_search(nm.file_trie, req->filename);
+    if (!meta || strcmp(meta->owner, msg->sender) != 0) {
+        pthread_mutex_unlock(&nm.request_mutex);
+        if (meta) free(meta);
+        response.status = ERR_NOT_OWNER;
+        send_message(client_sock, &response);
+        return;
+    }
+    
+    // Grant access
+    int found = 0;
+    for (int i = 0; i < meta->acl_count; i++) {
+        if (strcmp(meta->acl[i].username, req->username) == 0) {
+            meta->acl[i].access = req->requested_access;
+            found = 1;
+            break;
+        }
+    }
+    
+    if (!found && meta->acl_count < MAX_ACL_ENTRIES) {
+        strcpy(meta->acl[meta->acl_count].username, req->username);
+        meta->acl[meta->acl_count].access = req->requested_access;
+        meta->acl_count++;
+    }
+    
+    trie_update(nm.file_trie, req->filename, meta);
+    cache_put(nm.cache, req->filename, meta);
+    
+    // Remove request
+    for (int i = request_id; i < nm.request_count - 1; i++) {
+        nm.access_requests[i] = nm.access_requests[i + 1];
+    }
+    nm.request_count--;
+    
+    pthread_mutex_unlock(&nm.request_mutex);
+    
+    response.status = SUCCESS;
+    log_formatted(LOG_INFO, "Approved access request for %s to %s", 
+                 req->username, req->filename);
+    
+    free(meta);
+    send_message(client_sock, &response);
+}
+
+void handle_denyrequest(int client_sock, Message *msg) {
+    Message response;
+    init_message(&response);
+    
+    int request_id = msg->sentence_index;  // Reuse field for request ID
+    
+    pthread_mutex_lock(&nm.request_mutex);
+    
+    if (request_id < 0 || request_id >= nm.request_count) {
+        pthread_mutex_unlock(&nm.request_mutex);
+        response.status = ERR_INVALID_INDEX;
+        send_message(client_sock, &response);
+        return;
+    }
+    
+    AccessRequest *req = &nm.access_requests[request_id];
+    
+    // Verify ownership
+    FileMetadata *meta = trie_search(nm.file_trie, req->filename);
+    if (!meta || strcmp(meta->owner, msg->sender) != 0) {
+        pthread_mutex_unlock(&nm.request_mutex);
+        if (meta) free(meta);
+        response.status = ERR_NOT_OWNER;
+        send_message(client_sock, &response);
+        return;
+    }
+    
+    // Remove request
+    log_formatted(LOG_INFO, "Denied access request for %s to %s", 
+                 req->username, req->filename);
+    
+    for (int i = request_id; i < nm.request_count - 1; i++) {
+        nm.access_requests[i] = nm.access_requests[i + 1];
+    }
+    nm.request_count--;
+    
+    pthread_mutex_unlock(&nm.request_mutex);
+    
+    free(meta);
+    response.status = SUCCESS;
     send_message(client_sock, &response);
 }
 
@@ -1201,6 +1409,18 @@ void* handle_client_connection(void* arg) {
                      msg.sender, msg.type, msg.filename);
         
         switch (msg.type) {
+            case MSG_REQUESTACCESS:
+                handle_requestaccess(client_sock, &msg);
+                break;
+            case MSG_VIEWREQUESTS:
+                handle_viewrequests(client_sock, &msg);
+                break;
+            case MSG_APPROVEREQUEST:
+                handle_approverequest(client_sock, &msg);
+                break;
+            case MSG_DENYREQUEST:
+                handle_denyrequest(client_sock, &msg);
+                break;
             case MSG_CHECKPOINT:
             case MSG_VIEWCHECKPOINT:
             case MSG_REVERT:

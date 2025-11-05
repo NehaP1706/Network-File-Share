@@ -84,6 +84,10 @@ typedef enum {
     MSG_VIEWCHECKPOINT,   // View checkpoint
     MSG_REVERT,           // Revert to checkpoint
     MSG_LISTCHECKPOINTS,  // List checkpoints
+    MSG_REQUESTACCESS,    // Request file access
+    MSG_VIEWREQUESTS,     // View pending access requests
+    MSG_APPROVEREQUEST,   // Approve access request
+    MSG_DENYREQUEST,      // Deny access request
     MSG_SS_INFO           // SS requesting file info
 } MessageType;
 
@@ -176,6 +180,14 @@ typedef struct {
     time_t lock_time;
     pthread_mutex_t mutex;
 } SentenceLock;
+
+// Access Request Entry
+typedef struct {
+    char username[MAX_USERNAME];
+    char filename[MAX_FILENAME];
+    AccessType requested_access;
+    time_t request_time;
+} AccessRequest;
 
 // Function declarations
 void init_message(Message *msg);

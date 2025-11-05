@@ -815,6 +815,97 @@ void handle_undo(char *filename) {
     close(ss_sock);
 }
 
+void handle_requestaccess(char *flag, char *filename) {
+    Message msg;
+    init_message(&msg);
+    msg.type = MSG_REQUESTACCESS;
+    strcpy(msg.sender, client.username);
+    strcpy(msg.filename, filename);
+    
+    if (strcmp(flag, "-R") == 0) {
+        msg.access = ACCESS_READ;
+    } else if (strcmp(flag, "-W") == 0) {
+        msg.access = ACCESS_READWRITE;
+    } else {
+        printf("Invalid flag. Use -R for read or -W for write\n");
+        return;
+    }
+    
+    send_message(client.nm_sock, &msg);
+    
+    Message response;
+    recv_message(client.nm_sock, &response);
+    
+    if (response.status == SUCCESS) {
+        printf("Access request sent successfully!\n");
+        if (strlen(response.data) > 0) {
+            printf("%s\n", response.data);
+        }
+    } else {
+        print_error(response.status);
+    }
+}
+
+void handle_viewrequests() {
+    Message msg;
+    init_message(&msg);
+    msg.type = MSG_VIEWREQUESTS;
+    strcpy(msg.sender, client.username);
+    
+    send_message(client.nm_sock, &msg);
+    
+    Message response;
+    recv_message(client.nm_sock, &response);
+    
+    if (response.status == SUCCESS) {
+        printf("Pending Access Requests:\n%s", response.data);
+    } else {
+        print_error(response.status);
+    }
+}
+
+void handle_approverequest(char *request_id_str) {
+    int request_id = atoi(request_id_str);
+    
+    Message msg;
+    init_message(&msg);
+    msg.type = MSG_APPROVEREQUEST;
+    strcpy(msg.sender, client.username);
+    msg.sentence_index = request_id;
+    
+    send_message(client.nm_sock, &msg);
+    
+    Message response;
+    recv_message(client.nm_sock, &response);
+    
+    if (response.status == SUCCESS) {
+        printf("Access request approved successfully!\n");
+    } else {
+        print_error(response.status);
+    }
+}
+
+void handle_denyrequest(char *request_id_str) {
+    int request_id = atoi(request_id_str);
+    
+    Message msg;
+    init_message(&msg);
+    msg.type = MSG_DENYREQUEST;
+    strcpy(msg.sender, client.username);
+    msg.sentence_index = request_id;
+    
+    send_message(client.nm_sock, &msg);
+    
+    Message response;
+    recv_message(client.nm_sock, &response);
+    
+    if (response.status == SUCCESS) {
+        printf("Access request denied successfully!\n");
+    } else {
+        print_error(response.status);
+    }
+}
+
 void command_loop() {
     char line[MAX_BUFFER];
     
@@ -904,6 +995,10 @@ void command_loop() {
             printf("  VIEWCHECKPOINT <filename> <tag> - View checkpoint content\n");
             printf("  REVERT <filename> <tag> - Revert to checkpoint\n");
             printf("  LISTCHECKPOINTS <filename> - List all checkpoints\n");
+            printf("  REQUESTACCESS -R|-W <filename> - Request file access\n");
+            printf("  VIEWREQUESTS          - View pending access requests\n");
+            printf("  APPROVEREQUEST <id>   - Approve access request\n");
+            printf("  DENYREQUEST <id>      - Deny access request\n");
             printf("  exit                  - Exit client\n");
         } else if (strcmp(cmd, "VIEW") == 0) {
             handle_view(argc_local > 1 ? tail : NULL);
@@ -1010,6 +1105,26 @@ void command_loop() {
                 printf("Usage: LISTCHECKPOINTS <filename>\n");
             } else {
                 handle_listcheckpoints(argv[1]);
+            }
+        } else if (strcmp(cmd, "REQUESTACCESS") == 0) {
+            if (argc_local < 3) {
+                printf("Usage: REQUESTACCESS -R|-W <filename>\n");
+            } else {
+                handle_requestaccess(argv[1], argv[2]);
+            }
+        } else if (strcmp(cmd, "VIEWREQUESTS") == 0) {
+            handle_viewrequests();
+        } else if (strcmp(cmd, "APPROVEREQUEST") == 0) {
+            if (argc_local < 2) {
+                printf("Usage: APPROVEREQUEST <request_id>\n");
+            } else {
+                handle_approverequest(argv[1]);
+            }
+        } else if (strcmp(cmd, "DENYREQUEST") == 0) {
+            if (argc_local < 2) {
+                printf("Usage: DENYREQUEST <request_id>\n");
+            } else {
+                handle_denyrequest(argv[1]);
             }
         } else {
             printf("Unknown command: %s\n", cmd);
