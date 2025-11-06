@@ -985,6 +985,20 @@ void handle_delete(int client_sock, Message *msg) {
     send_message(client_sock, &response);
 }
 
+int user_exists(const char *username) {
+    pthread_mutex_lock(&nm.client_mutex);
+    
+    for (int i = 0; i < nm.client_count; i++) {
+        if (strcmp(nm.client_list[i].username, username) == 0) {
+            pthread_mutex_unlock(&nm.client_mutex);
+            return 1;
+        }
+    }
+    
+    pthread_mutex_unlock(&nm.client_mutex);
+    return 0;
+}
+
 void handle_access(int client_sock, Message *msg) {
     Message response;
     init_message(&response);
@@ -1005,6 +1019,25 @@ void handle_access(int client_sock, Message *msg) {
     }
     
     if (msg->type == MSG_ADDACCESS) {
+        if (!user_exists(msg->target_user)) {
+            free(meta);
+            response.status = ERR_USER_NOT_FOUND;
+            send_message(client_sock, &response);
+            log_formatted(LOG_WARNING, "Cannot add access: user %s not found", 
+                         msg->target_user);
+            return;
+        }
+        
+        // Check if owner is trying to add themselves (redundant)
+        if (strcmp(msg->target_user, msg->sender) == 0) {
+            free(meta);
+            response.status = ERR_INVALID_OPERATION;
+            send_message(client_sock, &response);
+            log_formatted(LOG_WARNING, "User %s tried to add access to themselves for %s", 
+                         msg->sender, msg->filename);
+            return;
+        }
+
         // Check if user already has access
         int found = 0;
         for (int i = 0; i < meta->acl_count; i++) {
