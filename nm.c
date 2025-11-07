@@ -627,6 +627,9 @@ void handle_view(int client_sock, Message *msg) {
     int show_all = 0;
     int show_details = 0;
 
+    printf("[DEBUG] Received message: %d\n", msg->type);
+    printf("[DEBUG] Message data: %s\n", msg->data);
+
     /* Parse flags from msg->data: accept combined/repeated flags like -al, -laaa, -a -l, -all */
 
     if (msg && msg->data && msg->data[0] != '\0') {
@@ -704,6 +707,7 @@ void handle_view(int client_sock, Message *msg) {
     response.status = SUCCESS;
     
     char buffer[MAX_BUFFER];
+    memset(buffer, 0, MAX_BUFFER);
     int pos = 0;
     
     if (show_details) {
@@ -714,7 +718,14 @@ void handle_view(int client_sock, Message *msg) {
     }
     
     for (int i = 0; i < file_count; i++) {
-        int has_access = show_all || check_access(files[i]->filename, msg->sender, ACCESS_READ);
+        int has_access;
+        if (show_all) {
+            // With -a flag, show everything
+            has_access = 1;
+        } else {
+            // Without -a flag, check if user has read access
+            has_access = check_access(files[i]->filename, msg->sender, ACCESS_READ);
+        }
         
         if (has_access) {
             if (show_details) {
@@ -827,7 +838,9 @@ void handle_list(int client_sock, Message *msg) {
     response.type = MSG_DATA;
     response.status = SUCCESS;
     
-    char buffer[MAX_BUFFER] = "";
+    char buffer[MAX_BUFFER];
+    memset(buffer, 0, MAX_BUFFER);  // FIXED: Clear buffer completely
+    int pos = 0;
     
     pthread_mutex_lock(&nm.client_mutex);
     for (int i = 0; i < nm.client_count; i++) {
