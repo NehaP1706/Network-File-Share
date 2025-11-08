@@ -255,7 +255,7 @@ void handle_requestaccess(int client_sock, Message *msg) {
     pthread_mutex_lock(&nm.request_mutex);
     for (int i = 0; i < nm.request_count; i++) {
         if (strcmp(nm.access_requests[i].username, msg->sender) == 0 &&
-            strcmp(nm.access_requests[i].filename, msg->filename) == 0) {
+            strcmp(nm.access_requests[i].filename, msg->filename) == 0 && nm.access_requests[i].requested_access == msg->access) {
             pthread_mutex_unlock(&nm.request_mutex);
             free(meta);
             response.status = SUCCESS;
