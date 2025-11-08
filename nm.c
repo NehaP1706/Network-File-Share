@@ -1511,7 +1511,7 @@ void* handle_client_connection(void* arg) {
                 // Return SS info for direct connection
                 response.type = MSG_DATA;
                 
-                if (msg.type == MSG_WRITE) {
+                if (msg.type == MSG_WRITE || msg.type == MSG_UNDO) {
                     if (!check_access(msg.filename, msg.sender, ACCESS_WRITE)) {
                         response.status = ERR_ACCESS_DENIED;
                         send_message(client_sock, &response);
