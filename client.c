@@ -453,6 +453,7 @@ void handle_write(char *filename, char *sent_idx_str) {
     // Read write commands
     char line[MAX_BUFFER];
     int write_count = 0;
+    int status = 1;
     
     while (1) {
         printf("Client: ");
@@ -489,6 +490,7 @@ void handle_write(char *filename, char *sent_idx_str) {
         
         if (response.status != SUCCESS) {
             print_error(response.status);
+            status = 0;
             break;
         }
         
@@ -516,13 +518,20 @@ void handle_write(char *filename, char *sent_idx_str) {
     }
     
     // Realized when multiple writes are done, unlock might fail - N
-    if (response.status == SUCCESS && write_count > 0) {
+    if (response.status == SUCCESS && write_count > 0 && status) {
         printf("Write successful!\n");
     } else if (write_count == 0) {
         printf("No writes performed.\n");
     } else {
-        printf("Unlock failed!\n");
-        print_error(response.status);
+        if (status) 
+        {
+            printf("Unlock failed!\n");
+            print_error(response.status);
+        }
+        else
+        {
+            printf("The file was possibly deleted mid-write!\n");
+        }
     }
     
     close(ss_sock);
