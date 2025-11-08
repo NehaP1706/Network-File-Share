@@ -1543,6 +1543,17 @@ void* handle_client_connection(void* arg) {
                     }
                 }
                 pthread_mutex_unlock(&nm.ss_mutex);
+
+                FileMetadata *meta = trie_search(nm.file_trie, msg.filename);
+                if (meta) {
+                    meta->accessed = time(NULL);
+                    strcpy(meta->last_accessed_by, msg.sender);
+                    trie_update(nm.file_trie, msg.filename, meta);
+                    cache_put(nm.cache, msg.filename, meta);
+                    free(meta);
+                    log_formatted(LOG_INFO, "Updated access time for %s (accessed by %s)", 
+                                msg.filename, msg.sender);
+                }
                 
                 send_message(client_sock, &response);
                 break;

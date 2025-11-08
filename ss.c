@@ -7,6 +7,8 @@
 #include <arpa/inet.h>
 #include <ifaddrs.h>
 #include <sys/time.h>
+#include <time.h>
+#include <utime.h>
 
 #define SS_STORAGE_DIR "./ss_storage"
 #define HEARTBEAT_INTERVAL 5
@@ -345,6 +347,15 @@ int read_file_ss(const char *filename, char *buffer) {
     buffer[bytes_read] = '\0';
     
     fclose(file);
+
+    struct stat st;
+    if (stat(filepath, &st) == 0) {
+        struct utimbuf times;
+        times.actime = time(NULL);   // Update access time
+        times.modtime = st.st_mtime; // Keep modification time unchanged
+        utime(filepath, &times);
+    }
+
     return SUCCESS;
 }
 
@@ -411,6 +422,15 @@ int write_file_ss(const char *filename, int sent_idx, int word_idx, const char *
         log_formatted(LOG_ERROR, "Failed to write file content back to disk");
         free_file_content(fc);
         return ERR_SERVER_ERROR;
+    }
+
+    struct stat st;
+
+    if (stat(filepath, &st) == 0) {
+        struct utimbuf times;
+        times.actime = time(NULL);   // Update access time
+        times.modtime = st.st_mtime; // Keep modification time unchanged
+        utime(filepath, &times);
     }
     
     free_file_content(fc);
@@ -641,7 +661,7 @@ void* handle_client_request(void* arg) {
         switch (msg.type) {
             case MSG_READ: {
                 char buffer[MAX_BUFFER];
-                response.status = read_file_ss(msg.filename, buffer);
+                 response.status = read_file_ss(msg.filename, buffer);
                 if (response.status == SUCCESS) {
                     strncpy(response.data, buffer, MAX_BUFFER - 1);
                 }
