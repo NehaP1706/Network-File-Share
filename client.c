@@ -1,5 +1,10 @@
 #include "common.h"
 #include "logger.h"
+#include <signal.h> // For signal handling - S
+#include <unistd.h> // For signal handling - S
+#include <fcntl.h>  // For pipe fcntl - S
+#include <errno.h> // For errno - S
+#include <sys/select.h> // For select - S
 
 // Add struct elements to store nm server ip and port for connection (8081) - N
 typedef struct {
@@ -11,6 +16,81 @@ typedef struct {
 } Client;
 
 Client client;
+
+// Signal handling variables - S
+volatile sig_atomic_t current_ss_sock = -1;
+volatile sig_atomic_t current_locked_sentence = -1;
+char current_locked_filename[MAX_FILENAME] = {0};
+int sig_pipe[2] = {-1, -1}; // pipe for signal handling - S
+volatile sig_atomic_t sigint_received = 0; // flag for signal handling - S
+
+// Signal handler for SIGINT - S
+void sigint_handler(int signo) {
+
+    // send signal to main loop via pipe - S
+    if(sig_pipe[1] != -1) {
+        const char b = 'I';
+        ssize_t r = write(sig_pipe[1], &b, 1);
+        (void)r;
+    }
+
+    sigint_received = 1;
+
+    // calling send/recv/exit in signal handler is unsafe, so using a pipe to notify main loop - S
+    // if(current_ss_sock > 0 && current_locked_sentence >= 0) {
+    //     Message msg;
+    //     init_message(&msg);
+    //     msg.type = MSG_UNLOCK_SENTENCE;
+    //     strncpy(msg.filename, current_locked_filename, MAX_FILENAME - 1);
+    //     msg.filename[MAX_FILENAME - 1] = '\0';
+    //     strcpy(msg.sender, client.username);
+    //     msg.sentence_index = current_locked_sentence;
+
+    //     send_message((int)current_ss_sock, &msg);
+    //     //close((int)current_ss_sock);
+    // }
+
+    // if(client.nm_sock > 0) {
+    //     close(client.nm_sock);
+    // }
+    // close_logger();
+
+    // _exit(1);
+}
+
+// Function to perform unlock if needed on ctrl c - S
+void perform_pending_unlock() {
+    if(current_ss_sock > 0 && current_locked_sentence >= 0) {
+        Message msg;
+        init_message(&msg);
+        msg.type = MSG_UNLOCK_SENTENCE;
+        strncpy(msg.filename, current_locked_filename, MAX_FILENAME - 1);
+        msg.filename[MAX_FILENAME - 1] = '\0';
+        strcpy(msg.sender, client.username);
+        msg.sentence_index = current_locked_sentence;
+
+        if(send_message((int)current_ss_sock, &msg) < 0) {
+            printf("Error sending unlock message\n");
+        }
+        else {
+            Message resp;
+            if(recv_message((int)current_ss_sock, &resp) >= 0) {
+                if(resp.status ==SUCCESS)
+                {
+                    printf("\n[INFO] Sentence %d in file %s unlocked due to interrupt signal.\n", current_locked_sentence, current_locked_filename);
+                }
+                else {
+                    printf("\n[WARN] Unlock returned status %d\n", resp.status);
+                }
+            } else {
+                printf("[WARN] No response received for unlock message\n");
+            }
+        }
+
+        current_locked_sentence = -1;
+        current_locked_filename[0] = '\0';
+    }
+}
 
 // Function declarations
 void init_client();
@@ -402,6 +482,10 @@ void handle_create(char *filename) {
 
 void handle_write(char *filename, char *sent_idx_str) {
     int sent_idx = atoi(sent_idx_str);
+
+    // reset signal handling variables - S
+    current_locked_sentence = -1;   
+    current_locked_filename[0] = '\0';
     
     // Get SS info from NM
     Message msg;
@@ -427,6 +511,8 @@ void handle_write(char *filename, char *sent_idx_str) {
         return;
     }
     
+    current_ss_sock = ss_sock; // For signal handling - S
+
     // Lock sentence
     init_message(&msg);
     msg.type = MSG_LOCK_SENTENCE;
@@ -448,6 +534,10 @@ void handle_write(char *filename, char *sent_idx_str) {
         return;
     }
     
+    // For signal handling - S
+    current_locked_sentence = sent_idx; 
+    strncpy(current_locked_filename, filename, MAX_FILENAME - 1);
+
     printf("Sentence locked. Enter writes (word_index content), then type ETIRW:\n");
     
     // Read write commands
@@ -458,9 +548,22 @@ void handle_write(char *filename, char *sent_idx_str) {
     while (1) {
         printf("Client: ");
         if (!fgets(line, sizeof(line), stdin)) {
-            break;
+           // break;
+           // if signal received, unlock pending locks and exit - S
+           if(sigint_received) {
+            perform_pending_unlock();
+            printf("\nInterrupted; exiting client.\n");
+            exit(0);
+           }
+           break;
         }
         
+        // Check for signal during input - S
+        if(sigint_received) {
+            perform_pending_unlock();
+            printf("\nInterrupted; exiting client.\n");
+            exit(0);
+        }
         trim_whitespace(line);
         
         if (strcmp(line, "ETIRW") == 0) {
@@ -508,12 +611,20 @@ void handle_write(char *filename, char *sent_idx_str) {
     if (send_message(ss_sock, &msg) < 0) {
         printf("Error: Could not send unlock (connection lost)\n");
         close(ss_sock);
+        // clear signal handling variables - S
+        current_locked_sentence = -1;
+        current_ss_sock = -1;
+        current_locked_filename[0] = '\0';
         return;
     }
     
     if (recv_message(ss_sock, &response) < 0) {
         printf("Error: Could not receive unlock response (connection lost)\n");
         close(ss_sock);
+        // clear signal handling variables - S
+        current_ss_sock = -1;
+        current_locked_sentence = -1;
+        current_locked_filename[0] = '\0';
         return;
     }
     
@@ -535,6 +646,10 @@ void handle_write(char *filename, char *sent_idx_str) {
     }
     
     close(ss_sock);
+    // clear signal handling variables - S
+    current_ss_sock = -1;
+    current_locked_sentence = -1;
+    current_locked_filename[0] = '\0';
 }
 
 void handle_delete(char *filename) {
@@ -922,6 +1037,41 @@ void command_loop() {
     
     while (1) {
         printf("\n> ");
+        // this flushes the buffer - S
+        fflush(stdout);
+
+        // set up the file descriptor set - S
+        fd_set rfds;
+        FD_ZERO(&rfds);
+        FD_SET(STDIN_FILENO, &rfds);
+
+        if(sig_pipe[0] != -1) {
+            FD_SET(sig_pipe[0], &rfds);
+        }
+        int maxfd = (sig_pipe[0] > STDIN_FILENO) ? sig_pipe[0] : STDIN_FILENO;
+
+        // set up select - S
+        int sel = select(maxfd + 1, &rfds, NULL, NULL, NULL);
+        if(sel<0)
+        {
+            if(errno == EINTR) continue;
+            perror("select");
+            break;
+        }
+
+        // if we received an interrupt, break out of the loop
+        if(sig_pipe[0] != -1 && FD_ISSET(sig_pipe[0], &rfds)) {
+            char buf[64];
+            while(read(sig_pipe[0], buf, sizeof(buf)) > 0) {}
+            perform_pending_unlock();
+            printf("\nReceived interrupt, exiting client.\n");
+            break;
+        }
+
+        // else if no signal, check for stdin input - S
+        if(FD_ISSET(STDIN_FILENO, &rfds)){
+
+        
         if (!fgets(line, sizeof(line), stdin)) {
             break;
         }
@@ -1139,11 +1289,35 @@ void command_loop() {
             printf("Unknown command: %s\n", cmd);
             printf("Type 'help' for list of commands\n");
         }
+        // Free memory - S 
+        free(argv);
+    }
+
     }
 }
 
 // Allow the user client to set ip and port of the nm server to connect to at registration, specified to be known in the docs - N
 int main(int argc, char *argv[]) {
+
+    // set up signal handling pipe - S
+    if(pipe(sig_pipe)<0) {
+        perror("pipe");
+        return 1;
+    }
+
+    // set pipe to non-blocking to avoid potential deadlocks - S
+    int flags = fcntl(sig_pipe[0], F_GETFL, 0);
+    if (flags>=0) fcntl(sig_pipe[0], F_SETFL, flags | O_NONBLOCK);
+    flags = fcntl(sig_pipe[1], F_GETFL, 0);
+    if (flags>=0) fcntl(sig_pipe[1], F_SETFL, flags | O_NONBLOCK);
+    
+    // Set up signal handler - S
+    struct sigaction sa;
+    sa.sa_handler = sigint_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    sigaction(SIGINT, &sa, NULL);
+
     if (argc != 3) {
         printf("Usage: %s <nm_ip> <nm_port>\n", argv[0]);
         printf("Example: %s 127.0.0.1 8081\n", argv[0]);
@@ -1171,5 +1345,8 @@ int main(int argc, char *argv[]) {
     
     close(client.nm_sock);
     close_logger();  
+
+    if(sig_pipe[0] != -1) close(sig_pipe[0]);
+    if(sig_pipe[1] != -1) close(sig_pipe[1]);
     return 0;
 }

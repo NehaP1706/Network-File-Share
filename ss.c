@@ -441,7 +441,7 @@ int write_file_ss(const char *filename, int sent_idx, int word_idx, const char *
 
 int lock_sentence_ss(const char *filename, int sent_idx, const char *username) {
     init_file_locks(filename, sent_idx + 1); // Ensure locks are initialized (so that when ss initialises again, it has locks).
-    //the init_file_locks properly handles the case when locks already exist.
+    //the init_file_locks properly handles the case when locks already exist. - S
     SentenceLock *lock = get_sentence_lock(filename, sent_idx);
     if (!lock) {
         return ERR_INVALID_INDEX;
