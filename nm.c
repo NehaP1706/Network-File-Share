@@ -21,6 +21,10 @@ typedef struct {
     pthread_mutex_t ss_sock_mutexes[MAX_SS];  // One mutex per SS socket - N
     int next_ss_id;
     
+    RegisteredUser registered_users[MAX_CLIENTS * 10];
+    int registered_user_count;
+    pthread_mutex_t registered_users_mutex;
+
     ClientInfo client_list[MAX_CLIENTS];
     int client_count;
     pthread_mutex_t client_mutex;
@@ -70,6 +74,8 @@ void init_name_server() {
     pthread_mutex_init(&nm.ss_mutex, NULL);
     pthread_mutex_init(&nm.client_mutex, NULL);
     pthread_mutex_init(&nm.request_mutex, NULL);
+    pthread_mutex_init(&nm.registered_users_mutex, NULL);
+    nm.registered_user_count = 0;
     nm.request_count = 0;
     
     // ADD: Initialize per-SS socket mutexes - N
@@ -84,6 +90,35 @@ void init_name_server() {
     printf("[NM] Name Server initialized\n");
     printf("[NM] SS Port: %d\n", NM_SS_PORT);
     printf("[NM] Client Port: %d\n", NM_CLIENT_PORT);
+}
+
+void register_user_persistent(const char *username) {
+    pthread_mutex_lock(&nm.registered_users_mutex);
+    
+    // Check if user already exists
+    for (int i = 0; i < nm.registered_user_count; i++) {
+        if (strcmp(nm.registered_users[i].username, username) == 0) {
+            // Update last seen time
+            nm.registered_users[i].last_seen = time(NULL);
+            pthread_mutex_unlock(&nm.registered_users_mutex);
+            log_formatted(LOG_INFO, "User %s reconnected", username);
+            return;
+        }
+    }
+    
+    // Add new user
+    if (nm.registered_user_count < MAX_CLIENTS * 10) {
+        strcpy(nm.registered_users[nm.registered_user_count].username, username);
+        nm.registered_users[nm.registered_user_count].first_registered = time(NULL);
+        nm.registered_users[nm.registered_user_count].last_seen = time(NULL);
+        nm.registered_user_count++;
+        log_formatted(LOG_INFO, "New user registered: %s (total: %d)", 
+                     username, nm.registered_user_count);
+    } else {
+        log_formatted(LOG_ERROR, "Cannot register user %s: registry full", username);
+    }
+    
+    pthread_mutex_unlock(&nm.registered_users_mutex);
 }
 
 int find_ss_for_file(const char *filename) {
@@ -839,15 +874,28 @@ void handle_list(int client_sock, Message *msg) {
     response.status = SUCCESS;
     
     char buffer[MAX_BUFFER];
-    memset(buffer, 0, MAX_BUFFER);  // FIXED: Clear buffer completely
+    memset(buffer, 0, MAX_BUFFER);
     int pos = 0;
     
+    // Show currently connected users
+    pos += snprintf(buffer + pos, MAX_BUFFER - pos, "=== Connected Users ===\n");
     pthread_mutex_lock(&nm.client_mutex);
     for (int i = 0; i < nm.client_count; i++) {
-        strcat(buffer, nm.client_list[i].username);
-        strcat(buffer, "\n");
+        pos += snprintf(buffer + pos, MAX_BUFFER - pos, "%s (online)\n", 
+                       nm.client_list[i].username);
+        if (pos >= MAX_BUFFER - 100) break;
     }
     pthread_mutex_unlock(&nm.client_mutex);
+    
+    // Show all registered users
+    pos += snprintf(buffer + pos, MAX_BUFFER - pos, "\n=== All Registered Users ===\n");
+    pthread_mutex_lock(&nm.registered_users_mutex);
+    for (int i = 0; i < nm.registered_user_count; i++) {
+        pos += snprintf(buffer + pos, MAX_BUFFER - pos, "%s\n", 
+                       nm.registered_users[i].username);
+        if (pos >= MAX_BUFFER - 100) break;
+    }
+    pthread_mutex_unlock(&nm.registered_users_mutex);
     
     strncpy(response.data, buffer, MAX_BUFFER - 1);
     send_message(client_sock, &response);
@@ -999,16 +1047,16 @@ void handle_delete(int client_sock, Message *msg) {
 }
 
 int user_exists(const char *username) {
-    pthread_mutex_lock(&nm.client_mutex);
+    pthread_mutex_lock(&nm.registered_users_mutex);
     
-    for (int i = 0; i < nm.client_count; i++) {
-        if (strcmp(nm.client_list[i].username, username) == 0) {
-            pthread_mutex_unlock(&nm.client_mutex);
+    for (int i = 0; i < nm.registered_user_count; i++) {
+        if (strcmp(nm.registered_users[i].username, username) == 0) {
+            pthread_mutex_unlock(&nm.registered_users_mutex);
             return 1;
         }
     }
     
-    pthread_mutex_unlock(&nm.client_mutex);
+    pthread_mutex_unlock(&nm.registered_users_mutex);
     return 0;
 }
 
@@ -1419,6 +1467,7 @@ void* handle_client_connection(void* arg) {
         return NULL;
     }
     
+    register_user_persistent(msg.sender);
     pthread_mutex_lock(&nm.client_mutex);
     
     if (nm.client_count >= MAX_CLIENTS) {

@@ -189,6 +189,12 @@ typedef struct {
     time_t request_time;
 } AccessRequest;
 
+typedef struct {
+    char username[MAX_USERNAME];
+    time_t first_registered;
+    time_t last_seen;
+} RegisteredUser;
+
 // Function declarations
 void init_message(Message *msg);
 int send_message(int sock, Message *msg);
