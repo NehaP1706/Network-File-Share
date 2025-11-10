@@ -1,5 +1,6 @@
 #include "common.h"
 #include <sys/time.h> 
+#include <errno.h> // For errno - S
 
 // Set socket timeouts to prevent indefinite blocking - N
 int set_socket_timeouts(int sock, int send_timeout_sec, int recv_timeout_sec) {
@@ -157,17 +158,38 @@ int send_message(int sock, Message *msg) {
     int total_sent = 0;
     
     // Send length first
-    if (send(sock, &len, sizeof(int), 0) < 0) {
+    // if (send(sock, &len, sizeof(int), 0) < 0) {
+    //     return -1;
+    // }
+
+    // Send length first, with MSG_NOSIGNAL to prevent SIGPIPE - S
+    // if there is no MSG_NOSIGNAL, the program may terminate unexpectedly because of SIGPIPE
+    // Reference:
+    //Normally, if you try to send on a TCP socket that has been closed by the peer, the kernel detects that the connection is broken and triggers a SIGPIPE signal to your process.
+    //By default, SIGPIPE kills your process.
+    int sent = send(sock, &len, sizeof(int), MSG_NOSIGNAL);
+    if (sent<0)
+    {
         return -1;
     }
     
     // Send data
+    // while (total_sent < len) {
+    //     int sent = send(sock, buffer + total_sent, len - total_sent, 0);
+    //     if (sent < 0) {
+    //         return -1;
+    //     }
+    //     total_sent += sent;
+    // }
+
+    // Send data with MSG_NOSIGNAL to prevent SIGPIPE - S
     while (total_sent < len) {
-        int sent = send(sock, buffer + total_sent, len - total_sent, 0);
-        if (sent < 0) {
+        int s = send(sock, buffer + total_sent, len - total_sent, MSG_NOSIGNAL);
+        if (s < 0) {
+            if(errno == EINTR) continue;
             return -1;
         }
-        total_sent += sent;
+        total_sent += s;
     }
     
     return 0;

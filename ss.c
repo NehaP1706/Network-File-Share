@@ -643,7 +643,6 @@ void* handle_client_request(void* arg) {
     set_socket_timeouts(client_sock, SOCKET_TIMEOUT, SOCKET_TIMEOUT);
     
     Message msg;
-    
     while (ss.running) {
         if (recv_message(client_sock, &msg) < 0) {
              //log_formatted(LOG_INFO, "Client disconnected (socket=%d)", client_sock);
@@ -651,6 +650,8 @@ void* handle_client_request(void* arg) {
             //break;
             continue; // Was break before - N
         }
+
+        
         
         Message response;
         init_message(&response);

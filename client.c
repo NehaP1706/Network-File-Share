@@ -589,6 +589,7 @@ void handle_write(char *filename, char *sent_idx_str) {
         strcpy(msg.data, content);
         
         send_message(ss_sock, &msg);
+        printf("Sent write to SS\n");
         recv_message(ss_sock, &response);
         
         if (response.status != SUCCESS) {
@@ -1317,6 +1318,8 @@ int main(int argc, char *argv[]) {
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = 0;
     sigaction(SIGINT, &sa, NULL);
+
+    signal(SIGPIPE, SIG_IGN); // Ignore SIGPIPE to handle broken pipes manually (resolves crashes on SS failure) - S
 
     if (argc != 3) {
         printf("Usage: %s <nm_ip> <nm_port>\n", argv[0]);
