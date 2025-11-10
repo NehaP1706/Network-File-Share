@@ -544,6 +544,7 @@ void handle_write(char *filename, char *sent_idx_str) {
     char line[MAX_BUFFER];
     int write_count = 0;
     int status = 1;
+    int ss_disconnected = 0;
     
     while (1) {
         printf("Client: ");
@@ -588,9 +589,21 @@ void handle_write(char *filename, char *sent_idx_str) {
         msg.word_index = word_idx;
         strcpy(msg.data, content);
         
-        send_message(ss_sock, &msg);
+        if (send_message(ss_sock, &msg) < 0) {
+            printf("Error: Storage server disconnected during write\n");
+            ss_disconnected = 1;
+            status = 0;
+            break;
+        }
+
         printf("Sent write to SS\n");
-        recv_message(ss_sock, &response);
+        
+        if (recv_message(ss_sock, &response) < 0) {
+            printf("Error: Storage server disconnected during write\n");
+            ss_disconnected = 1;
+            status = 0;
+            break;
+        }
         
         if (response.status != SUCCESS) {
             print_error(response.status);
@@ -599,6 +612,15 @@ void handle_write(char *filename, char *sent_idx_str) {
         }
         
         write_count++;
+    }
+
+    if (ss_disconnected) {
+        printf("Write operation interrupted due to storage server disconnect.\n");
+        close(ss_sock);
+        current_ss_sock = -1;
+        current_locked_sentence = -1;
+        current_locked_filename[0] = '\0';
+        return;
     }
     
     // Unlock sentence
