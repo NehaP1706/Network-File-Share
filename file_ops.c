@@ -327,6 +327,18 @@ int insert_word_in_sentence(FileContent *fc, int sent_idx, int word_idx, const c
     
     // Count how many delimiters (new sentences) we're creating - N
     int new_sentences = 0;
+    
+    int last_delimiter_idx = -1;
+    for (int i = 0; i < part_count; i++) {
+        if (is_delimiter(parts[i][0])) {
+            last_delimiter_idx = i;
+        }
+    }
+
+    if (last_delimiter_idx >= 0 && last_delimiter_idx < part_count - 1) {
+        new_sentences = 1;
+    }
+
     for (int i = 0; i < part_count; i++) {
         if (is_delimiter(parts[i][0])) {
             new_sentences++;
@@ -360,43 +372,52 @@ int insert_word_in_sentence(FileContent *fc, int sent_idx, int word_idx, const c
     // Insert parts
     int current_sent_offset = 0;
     Sentence *cur_sent = &fc->sentences[sent_idx];
+    int in_new_sentence = 0;
     
     for (int i = 0; i < part_count; i++) {
-        if (is_delimiter(parts[i][0])) {
-            // Add delimiter to current sentence
-            if (cur_sent->word_count >= cur_sent->capacity) {
-                cur_sent->capacity *= 2;
-                cur_sent->words = realloc(cur_sent->words, sizeof(char*) * cur_sent->capacity);
-            }
-            
-            // Shift words in current sentence to make room
+        // Expand words array if needed
+        if (cur_sent->word_count >= cur_sent->capacity) {
+            cur_sent->capacity *= 2;
+            cur_sent->words = realloc(cur_sent->words, sizeof(char*) * cur_sent->capacity);
+        }
+        
+        // Check if this is the last delimiter that should split sentences
+        int should_split = (i == last_delimiter_idx && last_delimiter_idx < part_count - 1);
+        
+        if (!in_new_sentence) {
+            // Still in original sentence - shift words to make room
             for (int j = cur_sent->word_count; j > actual_idx; j--) {
                 cur_sent->words[j] = cur_sent->words[j - 1];
             }
             
-            cur_sent->words[actual_idx] = strdup(parts[i]);
-            cur_sent->word_count++;
-            
-            // Move to next sentence
-            current_sent_offset++;
-            cur_sent = &fc->sentences[sent_idx + current_sent_offset];
-            actual_idx = 0;  // Reset index for new sentence
-        } else {
-            // Expand words array if needed
-            if (cur_sent->word_count >= cur_sent->capacity) {
-                cur_sent->capacity *= 2;
-                cur_sent->words = realloc(cur_sent->words, sizeof(char*) * cur_sent->capacity);
-            }
-            
-            // Shift words to make room
-            for (int j = cur_sent->word_count; j > actual_idx; j--) {
-                cur_sent->words[j] = cur_sent->words[j - 1];
-            }
-            
-            // Insert word
+            // Insert word/delimiter
             cur_sent->words[actual_idx] = strdup(parts[i]);
             cur_sent->word_count++;
             actual_idx++;
+            
+            if (should_split) {
+                // Move remaining words to new sentence
+                Sentence *next_sent = &fc->sentences[sent_idx + 1];
+                int words_to_move = cur_sent->word_count - actual_idx;
+                
+                for (int j = 0; j < words_to_move; j++) {
+                    if (next_sent->word_count >= next_sent->capacity) {
+                        next_sent->capacity *= 2;
+                        next_sent->words = realloc(next_sent->words, sizeof(char*) * next_sent->capacity);
+                    }
+                    next_sent->words[next_sent->word_count++] = cur_sent->words[actual_idx + j];
+                }
+                cur_sent->word_count = actual_idx;
+                
+                // Switch to new sentence
+                cur_sent = next_sent;
+                actual_idx = cur_sent->word_count;
+                in_new_sentence = 1;
+            }
+        } else {
+            // In new sentence - just append
+            cur_sent->words[cur_sent->word_count++] = strdup(parts[i]);
+            actual_idx = cur_sent->word_count;
         }
         
         free(parts[i]);

@@ -457,7 +457,7 @@ int write_file_ss(const char *filename, int sent_idx, int word_idx, const char *
     if (stat(filepath, &st) == 0) {
         struct utimbuf times;
         times.actime = time(NULL);   // Update access time
-        times.modtime = st.st_mtime; // Keep modification time unchanged
+        times.modtime = time(NULL); // Keep modification time unchanged
         utime(filepath, &times);
     }
     
