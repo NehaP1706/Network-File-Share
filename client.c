@@ -191,6 +191,9 @@ void print_error(int status) {
         case ERR_SENTENCE_LOCKED:
             printf("Error: Sentence is locked by another user\n");
             break;
+        case ERR_FILE_LOCKED:  
+            printf("Error: Cannot delete file - one or more sentences are currently locked by other users\n");
+            break;
         case ERR_INVALID_INDEX:
             printf("Error: Invalid sentence or word index\n");
             break;
@@ -591,9 +594,101 @@ void handle_write(char *filename, char *sent_idx_str) {
         
         if (send_message(ss_sock, &msg) < 0) {
             printf("Error: Storage server disconnected during write\n");
-            ss_disconnected = 1;
-            status = 0;
-            break;
+            printf("Attempting to reconnect...\n");
+            close(ss_sock);
+            
+            // Try to reconnect to SS
+            init_message(&msg);
+            msg.type = MSG_WRITE;
+            strcpy(msg.sender, client.username);
+            strcpy(msg.filename, filename);
+            
+            if (send_message(client.nm_sock, &msg) < 0) {
+                printf("Error: Could not contact Name Server for reconnection\n");
+                status = 0;
+                break;
+            }
+            
+            if (recv_message(client.nm_sock, &response) < 0) {
+                printf("Error: Lost connection to Name Server\n");
+                status = 0;
+                break;
+            }
+            
+            if (response.status != SUCCESS) {
+                printf("Error: File no longer available\n");
+                print_error(response.status);
+                status = 0;
+                break;
+            }
+            
+            ss_sock = connect_to_ss(response.data);
+            if (ss_sock < 0) {
+                printf("Error: Could not reconnect to storage server\n");
+                status = 0;
+                break;
+            }
+            
+            current_ss_sock = ss_sock;
+            printf("Reconnected successfully. Attempting to re-acquire lock...\n");
+            
+            // Try to re-lock the sentence
+            init_message(&msg);
+            msg.type = MSG_LOCK_SENTENCE;
+            strcpy(msg.filename, filename);
+            strcpy(msg.sender, client.username);
+            msg.sentence_index = sent_idx;
+            
+            if (send_message(ss_sock, &msg) < 0 || recv_message(ss_sock, &response) < 0) {
+                printf("Error: Could not re-acquire lock after reconnection\n");
+                close(ss_sock);
+                current_ss_sock = -1;
+                status = 0;
+                break;
+            }
+            
+            if (response.status != SUCCESS) {
+                printf("Error: Could not re-acquire lock - ");
+                print_error(response.status);
+                close(ss_sock);
+                current_ss_sock = -1;
+                status = 0;
+                break;
+            }
+            
+            printf("Lock re-acquired. Retrying last write operation...\n");
+            
+            // Retry the write that failed
+            init_message(&msg);
+            msg.type = MSG_WRITE;
+            strcpy(msg.filename, filename);
+            strcpy(msg.sender, client.username);
+            msg.sentence_index = sent_idx;
+            msg.word_index = word_idx;
+            strcpy(msg.data, content);
+            
+            if (send_message(ss_sock, &msg) < 0) {
+                printf("Error: Retry failed - storage server disconnected again\n");
+                status = 0;
+                break;
+            }
+            
+            if (recv_message(ss_sock, &response) < 0) {
+                printf("Error: Retry failed - storage server disconnected again\n");
+                status = 0;
+                break;
+            }
+            
+            if (response.status != SUCCESS) {
+                printf("Error: Retry failed - ");
+                print_error(response.status);
+                status = 0;
+                break;
+            }
+            
+            printf("Write succeeded after reconnection!\n");
+            write_count++;
+            continue;
         }
 
         printf("Sent write to SS\n");

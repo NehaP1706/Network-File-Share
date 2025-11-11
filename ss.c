@@ -56,6 +56,34 @@ void init_file_locks(const char *filename, int sentence_count);
 int lock_sentence_ss(const char *filename, int sent_idx, const char *username);
 int unlock_sentence_ss(const char *filename, int sent_idx, const char *username);
 
+int check_file_locks(const char *filename) {
+    pthread_mutex_lock(&ss.locks_mutex);
+    
+    // Find the file's lock structure
+    for (int i = 0; i < ss.file_lock_count; i++) {
+        if (strcmp(ss.file_locks[i].filename, filename) == 0) {
+            // Check if any sentence is locked
+            for (int j = 0; j < ss.file_locks[i].lock_count; j++) {
+                SentenceLock *lock = &ss.file_locks[i].locks[j];
+                
+                pthread_mutex_lock(&lock->mutex);
+                int is_locked = lock->locked;
+                pthread_mutex_unlock(&lock->mutex);
+                
+                if (is_locked) {
+                    pthread_mutex_unlock(&ss.locks_mutex);
+                    log_formatted(LOG_INFO, "File %s has locked sentence %d", filename, j);
+                    return 1;  // File has locked sentences
+                }
+            }
+            break;
+        }
+    }
+    
+    pthread_mutex_unlock(&ss.locks_mutex);
+    return 0;  // No locks found
+}
+
 int get_system_ip(char *ip_buffer, size_t buffer_size) {
     struct ifaddrs *ifaddr, *ifa;
     int found = 0;
@@ -816,6 +844,14 @@ void* handle_nm_communication(void* arg) {
         log_formatted(LOG_REQUEST, "NM request: type=%d, file=%s", msg.type, msg.filename);
         
         switch (msg.type) {
+            case MSG_CHECK_LOCKS: {
+                int has_locks = check_file_locks(msg.filename);
+                response.status = has_locks ? ERR_FILE_LOCKED : SUCCESS;
+                log_formatted(LOG_INFO, "CHECK_LOCKS %s: has_locks=%d", 
+                            msg.filename, has_locks);
+                break;
+            }
+
             case MSG_CHECKPOINT: {
                 char filepath[MAX_PATH];
                 snprintf(filepath, sizeof(filepath), "%s/%s", ss.storage_path, msg.filename);

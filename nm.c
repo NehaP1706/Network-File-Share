@@ -1020,6 +1020,26 @@ void handle_delete(int client_sock, Message *msg) {
         send_message(client_sock, &response);
         return;
     }
+
+    Message lock_check;
+    init_message(&lock_check);
+    lock_check.type = MSG_CHECK_LOCKS;
+    strcpy(lock_check.filename, msg->filename);
+    
+    pthread_mutex_lock(&nm.ss_sock_mutexes[ss_idx]);
+    send_message(nm.ss_list[ss_idx].sock, &lock_check);
+    
+    Message lock_response;
+    recv_message(nm.ss_list[ss_idx].sock, &lock_response);
+    
+    if (lock_response.status == ERR_FILE_LOCKED) {
+        pthread_mutex_unlock(&nm.ss_sock_mutexes[ss_idx]);
+        response.status = ERR_FILE_LOCKED;
+        send_message(client_sock, &response);
+        log_formatted(LOG_WARNING, "Cannot delete %s - file has active locks", 
+                     msg->filename);
+        return;
+    }
     
     Message ss_msg;
     init_message(&ss_msg);
@@ -1027,7 +1047,6 @@ void handle_delete(int client_sock, Message *msg) {
     strcpy(ss_msg.filename, msg->filename);
     
     // FIXED: Lock the specific SS socket - N
-    pthread_mutex_lock(&nm.ss_sock_mutexes[ss_idx]);
     send_message(nm.ss_list[ss_idx].sock, &ss_msg);
     
     Message ss_response;

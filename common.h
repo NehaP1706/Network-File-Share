@@ -48,6 +48,7 @@
 #define ERR_SERVER_ERROR 500
 #define ERR_NOT_OWNER 401
 #define ERR_USER_NOT_FOUND 406
+#define ERR_FILE_LOCKED 424 
 
 // Ports
 #define NM_SS_PORT 8080          // Existing - commands
@@ -77,6 +78,7 @@ typedef enum {
     MSG_DATA,             // Data transfer
     MSG_ERROR,            // Error message
     MSG_STOP,             // Stop signal
+    MSG_CHECK_LOCKS, 
     MSG_CREATEFOLDER,     // Create folder
     MSG_MOVE,             // Move file to folder
     MSG_VIEWFOLDER,       // View folder contents
