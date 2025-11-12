@@ -483,10 +483,11 @@ void handle_create(char *filename) {
     }
 }
 
+
 void handle_write(char *filename, char *sent_idx_str) {
     int sent_idx = atoi(sent_idx_str);
 
-    // reset signal handling variables - S
+    // reset signal handling variables
     current_locked_sentence = -1;   
     current_locked_filename[0] = '\0';
     
@@ -514,7 +515,7 @@ void handle_write(char *filename, char *sent_idx_str) {
         return;
     }
     
-    current_ss_sock = ss_sock; // For signal handling - S
+    current_ss_sock = ss_sock;
 
     // Lock sentence
     init_message(&msg);
@@ -528,18 +529,15 @@ void handle_write(char *filename, char *sent_idx_str) {
     
     if (response.status != SUCCESS) {
         print_error(response.status);
-        if(response.status == ERR_SENTENCE_LOCKED)
-        {
-            return;
-        } // don't close socket connection when sentence cannot be locked - S 
-        // still doesn't resolve the issue
         close(ss_sock);
+        current_ss_sock = -1;
         return;
     }
     
-    // For signal handling - S
+    // For signal handling
     current_locked_sentence = sent_idx; 
     strncpy(current_locked_filename, filename, MAX_FILENAME - 1);
+    current_locked_filename[MAX_FILENAME - 1] = '\0';
 
     printf("Sentence locked. Enter writes (word_index content), then type ETIRW:\n");
     
@@ -547,27 +545,25 @@ void handle_write(char *filename, char *sent_idx_str) {
     char line[MAX_BUFFER];
     int write_count = 0;
     int status = 1;
-    int ss_disconnected = 0;
     
     while (1) {
         printf("Client: ");
         if (!fgets(line, sizeof(line), stdin)) {
-           // break;
-           // if signal received, unlock pending locks and exit - S
-           if(sigint_received) {
-            perform_pending_unlock();
-            printf("\nInterrupted; exiting client.\n");
-            exit(0);
-           }
-           break;
+            if(sigint_received) {
+                perform_pending_unlock();
+                printf("\nInterrupted; exiting client.\n");
+                exit(0);
+            }
+            break;
         }
         
-        // Check for signal during input - S
+        // Check for signal during input
         if(sigint_received) {
             perform_pending_unlock();
             printf("\nInterrupted; exiting client.\n");
             exit(0);
         }
+        
         trim_whitespace(line);
         
         if (strcmp(line, "ETIRW") == 0) {
@@ -583,82 +579,12 @@ void handle_write(char *filename, char *sent_idx_str) {
             continue;
         }
         
-        // Send write to SS
-        init_message(&msg);
-        msg.type = MSG_WRITE;
-        strcpy(msg.filename, filename);
-        strcpy(msg.sender, client.username);
-        msg.sentence_index = sent_idx;
-        msg.word_index = word_idx;
-        strcpy(msg.data, content);
+        // Try to send write to SS with retry logic
+        int retry_count = 0;
+        int write_success = 0;
         
-        if (send_message(ss_sock, &msg) < 0) {
-            printf("Error: Storage server disconnected during write\n");
-            printf("Attempting to reconnect...\n");
-            close(ss_sock);
-            
-            // Try to reconnect to SS
-            init_message(&msg);
-            msg.type = MSG_WRITE;
-            strcpy(msg.sender, client.username);
-            strcpy(msg.filename, filename);
-            
-            if (send_message(client.nm_sock, &msg) < 0) {
-                printf("Error: Could not contact Name Server for reconnection\n");
-                status = 0;
-                break;
-            }
-            
-            if (recv_message(client.nm_sock, &response) < 0) {
-                printf("Error: Lost connection to Name Server\n");
-                status = 0;
-                break;
-            }
-            
-            if (response.status != SUCCESS) {
-                printf("Error: File no longer available\n");
-                print_error(response.status);
-                status = 0;
-                break;
-            }
-            
-            ss_sock = connect_to_ss(response.data);
-            if (ss_sock < 0) {
-                printf("Error: Could not reconnect to storage server\n");
-                status = 0;
-                break;
-            }
-            
-            current_ss_sock = ss_sock;
-            printf("Reconnected successfully. Attempting to re-acquire lock...\n");
-            
-            // Try to re-lock the sentence
-            init_message(&msg);
-            msg.type = MSG_LOCK_SENTENCE;
-            strcpy(msg.filename, filename);
-            strcpy(msg.sender, client.username);
-            msg.sentence_index = sent_idx;
-            
-            if (send_message(ss_sock, &msg) < 0 || recv_message(ss_sock, &response) < 0) {
-                printf("Error: Could not re-acquire lock after reconnection\n");
-                close(ss_sock);
-                current_ss_sock = -1;
-                status = 0;
-                break;
-            }
-            
-            if (response.status != SUCCESS) {
-                printf("Error: Could not re-acquire lock - ");
-                print_error(response.status);
-                close(ss_sock);
-                current_ss_sock = -1;
-                status = 0;
-                break;
-            }
-            
-            printf("Lock re-acquired. Retrying last write operation...\n");
-            
-            // Retry the write that failed
+        while (retry_count < 5 && !write_success) {
+            // Prepare write message
             init_message(&msg);
             msg.type = MSG_WRITE;
             strcpy(msg.filename, filename);
@@ -667,107 +593,211 @@ void handle_write(char *filename, char *sent_idx_str) {
             msg.word_index = word_idx;
             strcpy(msg.data, content);
             
+            // Try to send write
             if (send_message(ss_sock, &msg) < 0) {
-                printf("Error: Retry failed - storage server disconnected again\n");
-                status = 0;
-                break;
+                // Send failed - connection lost
+                printf("Error: Storage server disconnected during write\n");
+                printf("Attempting to reconnect (attempt %d/5)...\n", retry_count + 1);
+                close(ss_sock);
+                current_ss_sock = -1;
+                retry_count++;
+                
+                // Try to get new SS info from NM
+                init_message(&msg);
+                msg.type = MSG_WRITE;
+                strcpy(msg.sender, client.username);
+                strcpy(msg.filename, filename);
+                
+                if (send_message(client.nm_sock, &msg) < 0) {
+                    printf("Error: Could not contact Name Server for reconnection\n");
+                    sleep(1);
+                    continue;
+                }
+                
+                if (recv_message(client.nm_sock, &response) < 0) {
+                    printf("Error: Lost connection to Name Server\n");
+                    sleep(1);
+                    continue;
+                }
+                
+                if (response.status != SUCCESS) {
+                    printf("Error: File no longer available\n");
+                    print_error(response.status);
+                    sleep(1);
+                    continue;
+                }
+                
+                // Try to reconnect to SS
+                ss_sock = connect_to_ss(response.data);
+                if (ss_sock < 0) {
+                    printf("Error: Could not reconnect to storage server\n");
+                    sleep(1);
+                    continue;
+                }
+                
+                current_ss_sock = ss_sock;
+                printf("Reconnected successfully. Attempting to re-acquire lock...\n");
+                
+                // Try to re-lock the sentence
+                init_message(&msg);
+                msg.type = MSG_LOCK_SENTENCE;
+                strcpy(msg.filename, filename);
+                strcpy(msg.sender, client.username);
+                msg.sentence_index = sent_idx;
+                
+                if (send_message(ss_sock, &msg) < 0 || recv_message(ss_sock, &response) < 0) {
+                    printf("Error: Could not re-acquire lock after reconnection\n");
+                    close(ss_sock);
+                    current_ss_sock = -1;
+                    sleep(1);
+                    continue;
+                }
+                
+                if (response.status != SUCCESS) {
+                    printf("Error: Could not re-acquire lock - ");
+                    print_error(response.status);
+                    close(ss_sock);
+                    current_ss_sock = -1;
+                    sleep(1);
+                    continue;
+                }
+                
+                printf("Lock re-acquired. Retrying write operation...\n");
+                // Loop will retry the send_message at the top
+                continue;
             }
             
+            // Send succeeded, now try to receive response
             if (recv_message(ss_sock, &response) < 0) {
-                printf("Error: Retry failed - storage server disconnected again\n");
-                status = 0;
-                break;
+                // Receive failed - connection lost
+                printf("Error: Storage server disconnected while waiting for response\n");
+                printf("Attempting to reconnect (attempt %d/5)...\n", retry_count + 1);
+                close(ss_sock);
+                current_ss_sock = -1;
+                retry_count++;
+                
+                // Same reconnection logic as above
+                init_message(&msg);
+                msg.type = MSG_WRITE;
+                strcpy(msg.sender, client.username);
+                strcpy(msg.filename, filename);
+                
+                if (send_message(client.nm_sock, &msg) < 0) {
+                    printf("Error: Could not contact Name Server for reconnection\n");
+                    sleep(1);
+                    continue;
+                }
+                
+                if (recv_message(client.nm_sock, &response) < 0) {
+                    printf("Error: Lost connection to Name Server\n");
+                    sleep(1);
+                    continue;
+                }
+                
+                if (response.status != SUCCESS) {
+                    printf("Error: File no longer available\n");
+                    print_error(response.status);
+                    sleep(1);
+                    continue;
+                }
+                
+                ss_sock = connect_to_ss(response.data);
+                if (ss_sock < 0) {
+                    printf("Error: Could not reconnect to storage server\n");
+                    sleep(1);
+                    continue;
+                }
+                
+                current_ss_sock = ss_sock;
+                printf("Reconnected successfully. Attempting to re-acquire lock...\n");
+                
+                init_message(&msg);
+                msg.type = MSG_LOCK_SENTENCE;
+                strcpy(msg.filename, filename);
+                strcpy(msg.sender, client.username);
+                msg.sentence_index = sent_idx;
+                
+                if (send_message(ss_sock, &msg) < 0 || recv_message(ss_sock, &response) < 0) {
+                    printf("Error: Could not re-acquire lock after reconnection\n");
+                    close(ss_sock);
+                    current_ss_sock = -1;
+                    sleep(1);
+                    continue;
+                }
+                
+                if (response.status != SUCCESS) {
+                    printf("Error: Could not re-acquire lock - ");
+                    print_error(response.status);
+                    close(ss_sock);
+                    current_ss_sock = -1;
+                    sleep(1);
+                    continue;
+                }
+                
+                printf("Lock re-acquired. Retrying write operation...\n");
+                continue;
             }
             
+            // Both send and receive succeeded
             if (response.status != SUCCESS) {
-                printf("Error: Retry failed - ");
+                printf("Write failed: ");
                 print_error(response.status);
                 status = 0;
-                break;
+                break; // Exit retry loop
             }
             
-            printf("Write succeeded after reconnection!\n");
+            // Write was successful!
+            write_success = 1;
             write_count++;
-            continue;
+            printf("Write successful!\n");
         }
-
-        printf("Sent write to SS\n");
         
-        if (recv_message(ss_sock, &response) < 0) {
-            printf("Error: Storage server disconnected during write\n");
-            ss_disconnected = 1;
+        // Check if we exhausted all retries
+        if (retry_count >= 5 && !write_success) {
+            printf("Error: Could not complete write after 5 reconnection attempts\n");
             status = 0;
+            break; // Exit main while loop
+        }
+        
+        // If write failed for non-connection reasons, exit
+        if (!write_success && retry_count == 0) {
             break;
         }
+    }
+    
+    // Unlock sentence if we still have a connection
+    if (current_ss_sock > 0) {
+        init_message(&msg);
+        msg.type = MSG_UNLOCK_SENTENCE;
+        strcpy(msg.filename, filename);
+        strcpy(msg.sender, client.username);
+        msg.sentence_index = sent_idx;
         
-        if (response.status != SUCCESS) {
-            print_error(response.status);
-            status = 0;
-            break;
-        }
-        
-        write_count++;
-    }
-
-    if (ss_disconnected) {
-        printf("Write operation interrupted due to storage server disconnect.\n");
-        close(ss_sock);
-        current_ss_sock = -1;
-        current_locked_sentence = -1;
-        current_locked_filename[0] = '\0';
-        return;
-    }
-    
-    // Unlock sentence
-    init_message(&msg);
-    msg.type = MSG_UNLOCK_SENTENCE;
-    strcpy(msg.filename, filename);
-    strcpy(msg.sender, client.username);
-    msg.sentence_index = sent_idx;
-    
-    // Added checks at every point - N
-    if (send_message(ss_sock, &msg) < 0) {
-        printf("Error: Could not send unlock (connection lost)\n");
-        close(ss_sock);
-        // clear signal handling variables - S
-        current_locked_sentence = -1;
-        current_ss_sock = -1;
-        current_locked_filename[0] = '\0';
-        return;
-    }
-    
-    if (recv_message(ss_sock, &response) < 0) {
-        printf("Error: Could not receive unlock response (connection lost)\n");
-        close(ss_sock);
-        // clear signal handling variables - S
-        current_ss_sock = -1;
-        current_locked_sentence = -1;
-        current_locked_filename[0] = '\0';
-        return;
-    }
-    
-    // Realized when multiple writes are done, unlock might fail - N
-    if (response.status == SUCCESS && write_count > 0 && status) {
-        printf("Write successful!\n");
-    } else if (write_count == 0) {
-        printf("No writes performed.\n");
-    } else {
-        if (status) 
-        {
-            printf("Unlock failed!\n");
+        if (send_message(ss_sock, &msg) < 0) {
+            printf("Error: Could not send unlock (connection lost)\n");
+        } else if (recv_message(ss_sock, &response) < 0) {
+            printf("Error: Could not receive unlock response (connection lost)\n");
+        } else if (response.status != SUCCESS) {
+            printf("Unlock failed: ");
             print_error(response.status);
         }
-        else
-        {
-            printf("The file was possibly deleted mid-write!\n");
-        }
+        
+        close(ss_sock);
     }
     
-    close(ss_sock);
-    // clear signal handling variables - S
+    // Clear signal handling variables
     current_ss_sock = -1;
     current_locked_sentence = -1;
     current_locked_filename[0] = '\0';
+    
+    // Print final status
+    if (write_count > 0 && status) {
+        printf("All writes completed successfully! (%d write(s))\n", write_count);
+    } else if (write_count == 0) {
+        printf("No writes performed.\n");
+    } else {
+        printf("Write session ended with errors. Completed %d write(s) before failure.\n", write_count);
+    }
 }
 
 void handle_delete(char *filename) {
