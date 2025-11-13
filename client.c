@@ -63,27 +63,27 @@ void perform_pending_unlock() {
     if(current_ss_sock > 0 && current_locked_sentence >= 0) {
         Message msg;
         init_message(&msg);
-        msg.type = MSG_UNLOCK_SENTENCE;
+        msg.type = MSG_CANCEL_WRITE;
         strncpy(msg.filename, current_locked_filename, MAX_FILENAME - 1);
         msg.filename[MAX_FILENAME - 1] = '\0';
         strcpy(msg.sender, client.username);
         msg.sentence_index = current_locked_sentence;
 
         if(send_message((int)current_ss_sock, &msg) < 0) {
-            printf("Error sending unlock message\n");
+            printf("Error sending cancel message\n");
         }
         else {
             Message resp;
             if(recv_message((int)current_ss_sock, &resp) >= 0) {
                 if(resp.status ==SUCCESS)
                 {
-                    printf("\n[INFO] Sentence %d in file %s unlocked due to interrupt signal.\n", current_locked_sentence, current_locked_filename);
+                    printf("\n[INFO] Write session cancelled and sentence %d in file %s unlocked due to interrupt signal.\n", current_locked_sentence, current_locked_filename);
                 }
                 else {
-                    printf("\n[WARN] Unlock returned status %d\n", resp.status);
+                    printf("\n[WARN] Cancel returned status %d\n", resp.status);
                 }
             } else {
-                printf("[WARN] No response received for unlock message\n");
+                printf("[WARN] No response received for cancel message\n");
             }
         }
 

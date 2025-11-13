@@ -38,6 +38,18 @@ typedef struct {
     volatile int running;
 } StorageServer;
 
+typedef struct {
+    char filename[MAX_FILENAME];
+    char username[MAX_FILENAME];
+    int sentence_idx;
+    char temp_filepath[MAX_PATH];
+    int active;
+} WriteSession;
+
+WriteSession write_sessions[MAX_CLIENTS*10];
+int write_session_count = 0;
+pthread_mutex_t write_sessions_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 StorageServer ss;
 
 void* handle_nm_communication(void* arg);
@@ -48,13 +60,238 @@ void scan_and_register_files();
 int create_file_ss(const char *filename);
 int delete_file_ss(const char *filename);
 int read_file_ss(const char *filename, char *buffer);
-int write_file_ss(const char *filename, int sent_idx, int word_idx, const char *content);
+int write_file_ss(const char *filename, const char* username, int sent_idx, int word_idx, const char *content);
 int stream_file_ss(int client_sock, const char *filename);
 int get_file_info_ss(const char *filename, FileMetadata *meta);
 SentenceLock* get_sentence_lock(const char *filename, int sentence_idx);
 void init_file_locks(const char *filename, int sentence_count);
 int lock_sentence_ss(const char *filename, int sent_idx, const char *username);
 int unlock_sentence_ss(const char *filename, int sent_idx, const char *username);
+WriteSession* get_write_session(const char* filename, const char* username, int sent_idx, int create);
+void remove_write_session(const char* filename, const char* username, int sent_idx);
+int commit_write_session_ss(const char* filename, const char* username, int sent_idx);
+int cancel_write_session_ss(const char* filename, const char* username, int sent_idx);
+
+WriteSession* get_write_session(const char *filename, const char *username, int sent_idx, int create) {
+    pthread_mutex_lock(&write_sessions_mutex);
+    
+    // Search for existing session
+    for (int i = 0; i < write_session_count; i++) {
+        if (write_sessions[i].active &&
+            strcmp(write_sessions[i].filename, filename) == 0 &&
+            strcmp(write_sessions[i].username, username) == 0 &&
+            write_sessions[i].sentence_idx == sent_idx) {
+            pthread_mutex_unlock(&write_sessions_mutex);
+            return &write_sessions[i];
+        }
+    }
+    
+    // Create new session if requested
+    if (create && write_session_count < MAX_CLIENTS * 10) {
+        WriteSession *session = &write_sessions[write_session_count];
+        strcpy(session->filename, filename);
+        strcpy(session->username, username);
+        session->sentence_idx = sent_idx;
+        
+        // Create temp file path: filename.temp_username_sentidx
+        snprintf(session->temp_filepath, sizeof(session->temp_filepath), 
+                 "%s/%s.temp_%s_%d", ss.storage_path, filename, username, sent_idx);
+        
+        session->active = 1;
+        write_session_count++;
+        
+        pthread_mutex_unlock(&write_sessions_mutex);
+        return session;
+    }
+    
+    pthread_mutex_unlock(&write_sessions_mutex);
+    return NULL;
+}
+
+void remove_write_session(const char *filename, const char *username, int sent_idx) {
+    pthread_mutex_lock(&write_sessions_mutex);
+    
+    for (int i = 0; i < write_session_count; i++) {
+        if (write_sessions[i].active &&
+            strcmp(write_sessions[i].filename, filename) == 0 &&
+            strcmp(write_sessions[i].username, username) == 0 &&
+            write_sessions[i].sentence_idx == sent_idx) {
+            
+            // Delete temp file
+            unlink(write_sessions[i].temp_filepath);
+            
+            // Mark inactive and compact array
+            for (int j = i; j < write_session_count - 1; j++) {
+                write_sessions[j] = write_sessions[j + 1];
+            }
+            write_session_count--;
+            break;
+        }
+    }
+    
+    pthread_mutex_unlock(&write_sessions_mutex);
+}
+
+int start_write_session_ss(const char *filename, const char *username, int sent_idx) {
+    char filepath[MAX_PATH];
+    snprintf(filepath, sizeof(filepath), "%s/%s", ss.storage_path, filename);
+    
+    // Create write session
+    WriteSession *session = get_write_session(filename, username, sent_idx, 1);
+    if (!session) {
+        log_formatted(LOG_ERROR, "Failed to create write session");
+        return ERR_SERVER_ERROR;
+    }
+    
+    // Copy current file content to temp file
+    FILE *src = fopen(filepath, "r");
+    if (!src) {
+        // File might be empty, create empty temp file
+        FILE *temp = fopen(session->temp_filepath, "w");
+        if (!temp) {
+            remove_write_session(filename, username, sent_idx);
+            return ERR_SERVER_ERROR;
+        }
+        fclose(temp);
+        log_formatted(LOG_INFO, "Created empty temp file for write session");
+        return SUCCESS;
+    }
+    
+    FILE *temp = fopen(session->temp_filepath, "w");
+    if (!temp) {
+        fclose(src);
+        remove_write_session(filename, username, sent_idx);
+        return ERR_SERVER_ERROR;
+    }
+    
+    // Copy content
+    char buffer[MAX_BUFFER];
+    size_t bytes;
+    while ((bytes = fread(buffer, 1, sizeof(buffer), src)) > 0) {
+        fwrite(buffer, 1, bytes, temp);
+    }
+    
+    fclose(src);
+    fclose(temp);
+    
+    log_formatted(LOG_INFO, "Started write session: %s by %s on sentence %d", 
+                 filename, username, sent_idx);
+    return SUCCESS;
+}
+
+int commit_write_session_ss(const char *filename, const char *username, int sent_idx) {
+    WriteSession *session = get_write_session(filename, username, sent_idx, 0);
+    if (!session) {
+        log_formatted(LOG_WARNING, "No write session to commit");
+        return SUCCESS; // Not an error, maybe already committed
+    }
+    
+    char filepath[MAX_PATH];
+    snprintf(filepath, sizeof(filepath), "%s/%s", ss.storage_path, filename);
+    
+    // Create undo backup of main file before merging
+    if (create_undo_backup(filepath) != 0) {
+        log_formatted(LOG_WARNING, "Could not create undo backup before merge");
+    }
+    
+    // Parse both files
+    FileContent *main_fc = init_file_content();
+    FileContent *temp_fc = init_file_content();
+    
+    int main_parsed = (parse_file(filepath, main_fc) == 0);
+    int temp_parsed = (parse_file(session->temp_filepath, temp_fc) == 0);
+    
+    if (!temp_parsed) {
+        log_formatted(LOG_ERROR, "Failed to parse temp file for commit");
+        free_file_content(main_fc);
+        free_file_content(temp_fc);
+        remove_write_session(filename, username, sent_idx);
+        return ERR_SERVER_ERROR;
+    }
+    
+    if (!main_parsed) {
+        // Main file is empty/new, just use temp file
+        log_formatted(LOG_INFO, "Main file empty, using temp file as-is");
+        if (write_file_content(filepath, temp_fc) != 0) {
+            free_file_content(main_fc);
+            free_file_content(temp_fc);
+            return ERR_SERVER_ERROR;
+        }
+    } else {
+        // Merge: Replace the edited sentence in main file with temp file's sentence
+        if (sent_idx < temp_fc->sentence_count && sent_idx < main_fc->sentence_count) {
+            // Free old sentence in main file
+            for (int i = 0; i < main_fc->sentences[sent_idx].word_count; i++) {
+                free(main_fc->sentences[sent_idx].words[i]);
+            }
+            free(main_fc->sentences[sent_idx].words);
+            
+            // Copy sentence from temp to main
+            main_fc->sentences[sent_idx] = temp_fc->sentences[sent_idx];
+            
+            // Prevent double-free by nulling out in temp_fc
+            temp_fc->sentences[sent_idx].words = NULL;
+            temp_fc->sentences[sent_idx].word_count = 0;
+            
+            log_formatted(LOG_INFO, "Merged sentence %d from temp to main", sent_idx);
+        } else if (sent_idx >= main_fc->sentence_count && sent_idx < temp_fc->sentence_count) {
+            // Temp file has new sentences, append them
+            log_formatted(LOG_INFO, "Appending new sentences from temp file");
+            
+            // Expand main_fc capacity if needed
+            while (main_fc->sentence_count + 1 > main_fc->capacity) {
+                main_fc->capacity *= 2;
+                main_fc->sentences = realloc(main_fc->sentences, 
+                                            sizeof(Sentence) * main_fc->capacity);
+            }
+            
+            // Copy the sentence
+            main_fc->sentences[main_fc->sentence_count] = temp_fc->sentences[sent_idx]; //ownership of sentence buffers were transferred here - S
+            temp_fc->sentences[sent_idx].words = NULL;
+            temp_fc->sentences[sent_idx].word_count = 0; // Prevent double-free - S
+            temp_fc->sentences[sent_idx].capacity = 0;
+            main_fc->sentence_count++;
+        }
+        
+        // Write merged content back
+        if (write_file_content(filepath, main_fc) != 0) {
+            log_formatted(LOG_ERROR, "Failed to write merged content");
+            free_file_content(main_fc);
+            free_file_content(temp_fc);
+            return ERR_SERVER_ERROR;
+        }
+    }
+    
+    // Update timestamps
+    struct stat st;
+    if (stat(filepath, &st) == 0) {
+        struct utimbuf times;
+        times.actime = time(NULL);
+        times.modtime = time(NULL);
+        utime(filepath, &times);
+    }
+    
+    free_file_content(main_fc);
+    free_file_content(temp_fc);
+    
+    // Clean up write session
+    remove_write_session(filename, username, sent_idx);
+    printf("...4\n");
+    log_formatted(LOG_INFO, "Committed write session for %s by %s", filename, username);
+    return SUCCESS;
+}
+
+int cancel_write_session_ss(const char *filename, const char *username, int sent_idx) {
+    WriteSession *session = get_write_session(filename, username, sent_idx, 0);
+    if (!session) {
+        return SUCCESS; // Already cancelled
+    }
+    
+    log_formatted(LOG_INFO, "Cancelled write session for %s by %s", filename, username);
+    remove_write_session(filename, username, sent_idx);
+    return SUCCESS;
+}
+
 
 int check_file_locks(const char *filename) {
     pthread_mutex_lock(&ss.locks_mutex);
@@ -387,20 +624,31 @@ int read_file_ss(const char *filename, char *buffer) {
     return SUCCESS;
 }
 
-int write_file_ss(const char *filename, int sent_idx, int word_idx, const char *content) {
-    char filepath[MAX_PATH];
-    snprintf(filepath, sizeof(filepath), "%s/%s", ss.storage_path, filename);
-    
-    log_formatted(LOG_DEBUG, "Write request: file=%s, sent=%d, word=%d, content='%s'", 
+int write_file_ss(const char *filename, const char* username, int sent_idx, int word_idx, const char *content) {
+     // Get the active write session
+    WriteSession *session = get_write_session(filename, username, sent_idx, 0);
+    if (!session) {
+        log_formatted(LOG_ERROR, "No active write session for %s by %s", filename, username);
+        return ERR_INVALID_OPERATION;
+    }
+
+    log_formatted(LOG_DEBUG, "Write to temp: file=%s, sent=%d, word=%d, content='%s'", 
                  filename, sent_idx, word_idx, content);
     
-    if (create_undo_backup(filepath) != 0) {
-        log_formatted(LOG_WARNING, "Could not create undo backup (file might be empty)");
-    }
+    // we probabaly will need this for writes within folders - S
+    // char filepath[MAX_PATH];
+    // snprintf(filepath, sizeof(filepath), "%s/%s", ss.storage_path, filename);
+    
+    log_formatted(LOG_DEBUG, "Write to temp: file=%s, sent=%d, word=%d, content='%s'", 
+                 filename, sent_idx, word_idx, content);
+    
+    // if (create_undo_backup(filepath) != 0) {
+    //     log_formatted(LOG_WARNING, "Could not create undo backup (file might be empty)");
+    // }
     
     FileContent *fc = init_file_content();
-    if (parse_file(filepath, fc) != 0) {
-        log_formatted(LOG_WARNING, "Could not parse file, treating as empty");
+    if (parse_file(session->temp_filepath, fc) != 0) {
+        log_formatted(LOG_WARNING, "Could not parse temp file, treating as empty");
         fc->sentence_count = 1;
         fc->sentences[0].capacity = SENTENCE_CAPACITY;
         fc->sentences[0].word_count = 0;
@@ -409,14 +657,14 @@ int write_file_ss(const char *filename, int sent_idx, int word_idx, const char *
 
     // printf("File has %d sentences before insertion\n", fc->sentence_count);
     if (fc->sentence_count == 0) {
-        log_formatted(LOG_DEBUG, "File is empty, initializing with one sentence");
+        log_formatted(LOG_DEBUG, "Temp file is empty, initializing with one sentence");
         fc->sentence_count = 1;
         fc->sentences[0].capacity = SENTENCE_CAPACITY;
         fc->sentences[0].word_count = 0;
         fc->sentences[0].words = malloc(sizeof(char*) * fc->sentences[0].capacity);
     }
     
-    log_formatted(LOG_DEBUG, "File has %d sentences before insertion", fc->sentence_count);
+    //log_formatted(LOG_DEBUG, "File has %d sentences before insertion", fc->sentence_count);
     
     if (sent_idx < 0 || sent_idx > fc->sentence_count) { // Changed >= to > - S
         log_formatted(LOG_ERROR, "Invalid sentence index: %d (file has %d sentences)", 
@@ -431,39 +679,41 @@ int write_file_ss(const char *filename, int sent_idx, int word_idx, const char *
     
     int new_sentences = insert_word_in_sentence(fc, sent_idx, word_idx, content);
     if (new_sentences < 0) {
-        log_formatted(LOG_ERROR, "Failed to insert word '%s' at sentence %d, word index %d "
+        log_formatted(LOG_ERROR, "Failed to insert word '%s' at sentence %d, word index %d in temp file"
                      "(sentence had %d words, valid range: 1-%d)", 
                      content, sent_idx, word_idx, words_in_sentence, words_in_sentence + 1);
         free_file_content(fc);
         return ERR_INVALID_INDEX;
     }
     
-    log_formatted(LOG_DEBUG, "Insertion successful, %d new sentences created, file now has %d sentences", 
-                 new_sentences, fc->sentence_count);
+    // log_formatted(LOG_DEBUG, "Insertion successful, %d new sentences created, file now has %d sentences", 
+    //              new_sentences, fc->sentence_count);
     
-    if (new_sentences > 0) {
-        log_formatted(LOG_DEBUG, "Expanding locks to %d sentences", fc->sentence_count);
-        init_file_locks(filename, fc->sentence_count);
-    }
+    //we probabbly will need this for expanding locks - S
+    // if (new_sentences > 0) {
+    //     log_formatted(LOG_DEBUG, "Expanding locks to %d sentences", fc->sentence_count);
+    //     init_file_locks(filename, fc->sentence_count);
+    // }
     
-    if (write_file_content(filepath, fc) != 0) {
-        log_formatted(LOG_ERROR, "Failed to write file content back to disk");
+    if (write_file_content(session->temp_filepath, fc) != 0) {
+        log_formatted(LOG_ERROR, "Failed to write temp file content back to disk");
         free_file_content(fc);
         return ERR_SERVER_ERROR;
     }
 
-    struct stat st;
+    //will probably need this to update timestamps (but for tempfile??) -- taken care in commit_write_session_ss - S
+    // struct stat st;
 
-    if (stat(filepath, &st) == 0) {
-        struct utimbuf times;
-        times.actime = time(NULL);   // Update access time
-        times.modtime = time(NULL); // Keep modification time unchanged
-        utime(filepath, &times);
-    }
+    // if (stat(filepath, &st) == 0) {
+    //     struct utimbuf times;
+    //     times.actime = time(NULL);   // Update access time
+    //     times.modtime = time(NULL); // Keep modification time unchanged
+    //     utime(filepath, &times);
+    // }
     
     free_file_content(fc);
-    log_formatted(LOG_INFO, "Successfully wrote to file: %s at sentence %d, word %d", 
-                 filename, sent_idx, word_idx);
+    log_formatted(LOG_INFO, "Successfully wrote to temp file: %s at sentence %d, word %d", 
+                 session->temp_filepath, sent_idx, word_idx);
     return SUCCESS;
 }
 
@@ -700,22 +950,53 @@ void* handle_client_request(void* arg) {
             
             case MSG_LOCK_SENTENCE: {
                 response.status = lock_sentence_ss(msg.filename, msg.sentence_index, msg.sender);
+
+                if (response.status == SUCCESS) {
+                    int session_status = start_write_session_ss(msg.filename, msg.sender, msg.sentence_index);
+                    if (session_status != SUCCESS) {
+                        // Failed to create session, unlock
+                        unlock_sentence_ss(msg.filename, msg.sentence_index, msg.sender);
+                        response.status = session_status;
+                        log_formatted(LOG_ERROR, "Failed to start write session, unlocking");
+                    } else {
+                        log_formatted(LOG_INFO, "Lock acquired and write session started");
+                    }
+                }
                 send_message(client_sock, &response);
                 break;
             }
             
             case MSG_WRITE: {
-                response.status = write_file_ss(msg.filename, msg.sentence_index, 
+                response.status = write_file_ss(msg.filename, msg.sender, msg.sentence_index, 
                                                msg.word_index, msg.data);
                 send_message(client_sock, &response);
                 break;
             }
             
             case MSG_UNLOCK_SENTENCE: {
+                int commit_status = commit_write_session_ss(msg.filename, msg.sender, msg.sentence_index);
+
+                if(commit_status == SUCCESS) {
+                    response.status = unlock_sentence_ss(msg.filename, msg.sentence_index, msg.sender);
+                    log_formatted(LOG_INFO, "Write commited and sentence unlocked");
+                }
+                else {
+                    response.status = commit_status;
+                    unlock_sentence_ss(msg.filename, msg.sentence_index, msg.sender);
+                    log_formatted(LOG_ERROR, "Commit failed but sentence unlocked");
+                }
+                //response.status = unlock_sentence_ss(msg.filename, msg.sentence_index, msg.sender);
+                send_message(client_sock, &response);
+                break;
+            }
+
+            case MSG_CANCEL_WRITE: {
+                cancel_write_session_ss(msg.filename, msg.sender, msg.sentence_index);
                 response.status = unlock_sentence_ss(msg.filename, msg.sentence_index, msg.sender);
                 send_message(client_sock, &response);
                 break;
             }
+            
             
             case MSG_STREAM: {
                 response.status = SUCCESS;

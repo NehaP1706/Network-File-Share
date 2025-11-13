@@ -90,7 +90,9 @@ typedef enum {
     MSG_VIEWREQUESTS,     // View pending access requests
     MSG_APPROVEREQUEST,   // Approve access request
     MSG_DENYREQUEST,      // Deny access request
-    MSG_SS_INFO           // SS requesting file info
+    MSG_SS_INFO,           // SS requesting file info
+    MSG_CANCEL_WRITE,      // Cancel write session without commiting
+    MSG_COMMIT_WRITE      // Explicit commit
 } MessageType;
 
 // Access Types

@@ -12,7 +12,6 @@ FileContent* init_file_content() {
 
 void free_file_content(FileContent *fc) {
     if (!fc) return;
-    
     for (int i = 0; i < fc->sentence_count; i++) {
         for (int j = 0; j < fc->sentences[i].word_count; j++) {
             free(fc->sentences[i].words[j]);
