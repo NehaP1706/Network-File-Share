@@ -483,6 +483,55 @@ void handle_create(char *filename) {
     }
 }
 
+void process_escape_sequences(char *str) {
+    char *src = str;
+    char *dst = str;
+    
+    while (*src) {
+        if (*src == '\\' && *(src + 1)) {
+            switch (*(src + 1)) {
+                case 'n':
+                    *dst++ = '\n';
+                    src += 2;
+                    break;
+                case 't':
+                    *dst++ = '\t';
+                    src += 2;
+                    break;
+                case 'r':
+                    *dst++ = '\r';
+                    src += 2;
+                    break;
+                case '\\':
+                    *dst++ = '\\';
+                    src += 2;
+                    break;
+                case '\'' :
+                    *dst++ = '\'';
+                    src += 2;
+                    break;
+                case '"' :
+                    *dst++ = '"';
+                    src += 2;
+                    break;
+                case '0': {
+                    /* simple NUL escape: treat as single char '\0' */
+                    *dst++ = '\0';
+                    src += 2;
+                    break;
+                }
+                default:
+                    /* Unknown escape: keep the char after backslash as-is. */
+                    *dst++ = *(src + 1);
+                    src += 2;
+                    break;
+                }
+        } else {
+            *dst++ = *src++;
+        }
+    }
+    *dst = '\0';
+}
 
 void handle_write(char *filename, char *sent_idx_str) {
     int sent_idx = atoi(sent_idx_str);
@@ -578,6 +627,8 @@ void handle_write(char *filename, char *sent_idx_str) {
             printf("Invalid format. Use: <word_index> <content>\n");
             continue;
         }
+
+        process_escape_sequences(content);
         
         // Try to send write to SS with retry logic
         int retry_count = 0;

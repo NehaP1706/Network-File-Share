@@ -35,11 +35,43 @@ char** split_by_delimiters(const char *word, int *count) {
     int buf_idx = 0;
     
     for (int i = 0; word[i] != '\0'; i++) {
-        if (is_delimiter(word[i])) {
+        if (word[i] == '\n') {
+            /* Save current buffer if not empty (trim whitespace) */
+            if (buf_idx > 0) {
+                buffer[buf_idx] = '\0';
+                /* trim trailing and leading whitespace from buffer */
+                int start = 0; while (buffer[start] && (buffer[start] == ' ' || buffer[start] == '\t' || buffer[start] == '\r')) start++;
+                int end = buf_idx - 1; while (end >= start && (buffer[end] == ' ' || buffer[end] == '\t' || buffer[end] == '\r')) end--;
+                buffer[end+1] = '\0';
+                if (start == 0) {
+                    parts[*count] = strdup(buffer);
+                } else {
+                    parts[*count] = strdup(buffer + start);
+                }
+                (*count)++;
+                buf_idx = 0;
+                if (*count >= cap) {
+                    cap *= 2;
+                    parts = realloc(parts, sizeof(char*) * cap);
+                }
+            }
+
+            /* Save newline as separate token */
+            parts[*count] = strdup("\n");
+            (*count)++;
+            if (*count >= cap) {
+                cap *= 2;
+                parts = realloc(parts, sizeof(char*) * cap);
+            }
+        } else if (is_delimiter(word[i])) {
             // Save current buffer if not empty
             if (buf_idx > 0) {
                 buffer[buf_idx] = '\0';
-                parts[*count] = strdup(buffer);
+                /* trim buffer whitespace */
+                int start = 0; while (buffer[start] && (buffer[start] == ' ' || buffer[start] == '\t' || buffer[start] == '\r')) start++;
+                int end = buf_idx - 1; while (end >= start && (buffer[end] == ' ' || buffer[end] == '\t' || buffer[end] == '\r')) end--;
+                buffer[end+1] = '\0';
+                if (start == 0) parts[*count] = strdup(buffer); else parts[*count] = strdup(buffer + start);
                 (*count)++;
                 buf_idx = 0;
                 
@@ -67,7 +99,11 @@ char** split_by_delimiters(const char *word, int *count) {
     // Save remaining buffer
     if (buf_idx > 0) {
         buffer[buf_idx] = '\0';
-        parts[*count] = strdup(buffer);
+        /* trim buffer whitespace */
+        int start = 0; while (buffer[start] && (buffer[start] == ' ' || buffer[start] == '\t' || buffer[start] == '\r')) start++;
+        int end = buf_idx - 1; while (end >= start && (buffer[end] == ' ' || buffer[end] == '\t' || buffer[end] == '\r')) end--;
+        buffer[end+1] = '\0';
+        if (start == 0) parts[*count] = strdup(buffer); else parts[*count] = strdup(buffer + start);
         (*count)++;
     }
     
@@ -97,7 +133,7 @@ int parse_file(const char *filepath, FileContent *fc) {
     int c;
     
     while ((c = fgetc(file)) != EOF) {
-        if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
+        if (c == ' ' || c == '\t' || c == '\r') {
             if (word_idx > 0) {
                 word[word_idx] = '\0';
                 
@@ -111,6 +147,30 @@ int parse_file(const char *filepath, FileContent *fc) {
                 
                 word_idx = 0;
             }
+        } else if (c == '\n') {
+            /* Treat newline as an explicit token so we can preserve it when
+               writing files back. We do NOT start a new sentence for a
+               newline; it's an in-sentence break. */
+            if (word_idx > 0) {
+                word[word_idx] = '\0';
+                Sentence *sent = &fc->sentences[current_sent];
+                if (sent->word_count >= sent->capacity) {
+                    sent->capacity *= 2;
+                    sent->words = realloc(sent->words, sizeof(char*) * sent->capacity);
+                }
+                sent->words[sent->word_count++] = strdup(word);
+                word_idx = 0;
+            }
+
+            /* Add newline token (single '\n' char) */
+            word[0] = '\n';
+            word[1] = '\0';
+            Sentence *sent_nl = &fc->sentences[current_sent];
+            if (sent_nl->word_count >= sent_nl->capacity) {
+                sent_nl->capacity *= 2;
+                sent_nl->words = realloc(sent_nl->words, sizeof(char*) * sent_nl->capacity);
+            }
+            sent_nl->words[sent_nl->word_count++] = strdup(word);
         } else if (is_delimiter(c)) {
             // Save current word if exists
             if (word_idx > 0) {
@@ -185,13 +245,21 @@ int parse_file(const char *filepath, FileContent *fc) {
     return 0;
 }
 
+int write_word_to_file(FILE *fp, const char *word) {
+    const char *p = word;
+    while (*p) {
+        fputc(*p++, fp);
+    }
+    return 0;
+}
+
 int write_file_content(const char *filepath, FileContent *fc) {
     FILE *file = fopen(filepath, "w");
     if (!file) return -1;
     
     for (int i = 0; i < fc->sentence_count; i++) {
         for (int j = 0; j < fc->sentences[i].word_count; j++) {
-            fprintf(file, "%s", fc->sentences[i].words[j]);
+            // fprintf(file, "%s", fc->sentences[i].words[j]);
             
             // // Add space after non-delimiter words (except last word in sentence)
             // if (j < fc->sentences[i].word_count - 1 && 
@@ -203,21 +271,33 @@ int write_file_content(const char *filepath, FileContent *fc) {
                - this is not the last word in the sentence, and
                - current token is not a delimiter, and
                - next token is not a delimiter (so we don't get "word .") -S */ 
- 
+
+                write_word_to_file(file, fc->sentences[i].words[j]);
 
                 if (j < fc->sentences[i].word_count - 1) {
                 int cur_is_delim = is_delimiter(fc->sentences[i].words[j][0]);
                 int next_is_delim = is_delimiter(fc->sentences[i].words[j + 1][0]);
-                if (!cur_is_delim && !next_is_delim) {
+                int cur_is_newline = (fc->sentences[i].words[j][0] == '\n' && fc->sentences[i].words[j][1] == '\0');
+                int next_is_newline = (fc->sentences[i].words[j + 1][0] == '\n' && fc->sentences[i].words[j + 1][1] == '\0');
+                if (!cur_is_delim && !next_is_delim && !cur_is_newline && !next_is_newline) {
                     fprintf(file, " ");
                 }
             }
 
         }
         
-        // Add space between sentences (except after last)
+        /* Add space between sentences (except after last), but avoid
+           inserting an extra space if the sentence already ends with a
+           newline token. */
         if (i < fc->sentence_count - 1) {
-            fprintf(file, " ");
+            if (fc->sentences[i].word_count > 0) {
+                char *last = fc->sentences[i].words[fc->sentences[i].word_count - 1];
+                if (!(last[0] == '\n' && last[1] == '\0')) {
+                    fprintf(file, " ");
+                }
+            } else {
+                fprintf(file, " ");
+            }
         }
     }
     
@@ -246,14 +326,23 @@ char* file_content_to_string(FileContent *fc) {
                 if (j < fc->sentences[i].word_count - 1) {
                     int cur_is_delim = is_delimiter(fc->sentences[i].words[j][0]);
                     int next_is_delim = is_delimiter(fc->sentences[i].words[j + 1][0]);
-                    if (!cur_is_delim && !next_is_delim) {
+                    int cur_is_newline = (fc->sentences[i].words[j][0] == '\n' && fc->sentences[i].words[j][1] == '\0');
+                    int next_is_newline = (fc->sentences[i].words[j + 1][0] == '\n' && fc->sentences[i].words[j + 1][1] == '\0');
+                    if (!cur_is_delim && !next_is_delim && !cur_is_newline && !next_is_newline) {
                         result[pos++] = ' ';
                     }
                 }
             }
         }
         if (i < fc->sentence_count - 1) {
-            result[pos++] = ' ';
+            if (fc->sentences[i].word_count > 0) {
+                char *last = fc->sentences[i].words[fc->sentences[i].word_count - 1];
+                if (!(last[0] == '\n' && last[1] == '\0')) {
+                    result[pos++] = ' ';
+                }
+            } else {
+                result[pos++] = ' ';
+            }
         }
     }
     

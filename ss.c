@@ -218,41 +218,68 @@ int commit_write_session_ss(const char *filename, const char *username, int sent
             return ERR_SERVER_ERROR;
         }
     } else {
-        // Merge: Replace the edited sentence in main file with temp file's sentence
-        if (sent_idx < temp_fc->sentence_count && sent_idx < main_fc->sentence_count) {
-            // Free old sentence in main file
-            for (int i = 0; i < main_fc->sentences[sent_idx].word_count; i++) {
-                free(main_fc->sentences[sent_idx].words[i]);
+        // Merge: splice temp file's sentences into main at sent_idx.
+        if (sent_idx < temp_fc->sentence_count) {
+            int before = sent_idx; // sentences to keep from main before index
+            int temp_to_insert = temp_fc->sentence_count - sent_idx; // number of sentences from temp starting at sent_idx
+            int after = 0;
+            if (main_fc->sentence_count > sent_idx + 1) {
+                after = main_fc->sentence_count - (sent_idx + 1);
             }
-            free(main_fc->sentences[sent_idx].words);
-            
-            // Copy sentence from temp to main
-            main_fc->sentences[sent_idx] = temp_fc->sentences[sent_idx];
-            
-            // Prevent double-free by nulling out in temp_fc
-            temp_fc->sentences[sent_idx].words = NULL;
-            temp_fc->sentences[sent_idx].word_count = 0;
-            
-            log_formatted(LOG_INFO, "Merged sentence %d from temp to main", sent_idx);
+
+            int new_total = before + temp_to_insert + after;
+            Sentence *new_sentences = malloc(sizeof(Sentence) * new_total);
+            if (!new_sentences) {
+                free_file_content(main_fc);
+                free_file_content(temp_fc);
+                return ERR_SERVER_ERROR;
+            }
+
+            // copy sentences before sent_idx from main (transfer ownership)
+            for (int i = 0; i < before; i++) {
+                new_sentences[i] = main_fc->sentences[i];
+            }
+
+            // copy sentences from temp starting at sent_idx (transfer ownership)
+            for (int i = 0; i < temp_to_insert; i++) {
+                new_sentences[before + i] = temp_fc->sentences[sent_idx + i];
+                // null out temp entries so free_file_content won't double-free
+                temp_fc->sentences[sent_idx + i].words = NULL;
+                temp_fc->sentences[sent_idx + i].word_count = 0;
+                temp_fc->sentences[sent_idx + i].capacity = 0;
+            }
+
+            // copy remaining sentences from main after sent_idx
+            for (int i = 0; i < after; i++) {
+                new_sentences[before + temp_to_insert + i] = main_fc->sentences[sent_idx + 1 + i];
+            }
+
+            // Free main's sentences array (but not the words we transferred)
+            free(main_fc->sentences);
+            main_fc->sentences = new_sentences;
+            main_fc->sentence_count = new_total;
+
+            log_formatted(LOG_INFO, "Spliced %d temp sentences into main at %d", temp_to_insert, sent_idx);
         } else if (sent_idx >= main_fc->sentence_count && sent_idx < temp_fc->sentence_count) {
-            // Temp file has new sentences, append them
+            // Temp file has new sentences beyond main's end, append them
             log_formatted(LOG_INFO, "Appending new sentences from temp file");
-            
-            // Expand main_fc capacity if needed
-            while (main_fc->sentence_count + 1 > main_fc->capacity) {
-                main_fc->capacity *= 2;
-                main_fc->sentences = realloc(main_fc->sentences, 
-                                            sizeof(Sentence) * main_fc->capacity);
+
+            int temp_count = temp_fc->sentence_count - sent_idx;
+            int new_total = main_fc->sentence_count + temp_count;
+            if (new_total > main_fc->capacity) {
+                while (main_fc->capacity < new_total) main_fc->capacity *= 2;
+                main_fc->sentences = realloc(main_fc->sentences, sizeof(Sentence) * main_fc->capacity);
             }
-            
-            // Copy the sentence
-            main_fc->sentences[main_fc->sentence_count] = temp_fc->sentences[sent_idx]; //ownership of sentence buffers were transferred here - S
-            temp_fc->sentences[sent_idx].words = NULL;
-            temp_fc->sentences[sent_idx].word_count = 0; // Prevent double-free - S
-            temp_fc->sentences[sent_idx].capacity = 0;
-            main_fc->sentence_count++;
+
+            for (int i = 0; i < temp_count; i++) {
+                main_fc->sentences[main_fc->sentence_count + i] = temp_fc->sentences[sent_idx + i];
+                temp_fc->sentences[sent_idx + i].words = NULL;
+                temp_fc->sentences[sent_idx + i].word_count = 0;
+                temp_fc->sentences[sent_idx + i].capacity = 0;
+            }
+            main_fc->sentence_count = new_total;
         }
-        
+
         // Write merged content back
         if (write_file_content(filepath, main_fc) != 0) {
             log_formatted(LOG_ERROR, "Failed to write merged content");
