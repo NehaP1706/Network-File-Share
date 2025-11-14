@@ -303,7 +303,7 @@ int commit_write_session_ss(const char *filename, const char *username, int sent
     
     // Clean up write session
     remove_write_session(filename, username, sent_idx);
-    printf("...4\n");
+    printf("Completed one write op!\n");
     log_formatted(LOG_INFO, "Committed write session for %s by %s", filename, username);
     return SUCCESS;
 }
@@ -693,7 +693,7 @@ int write_file_ss(const char *filename, const char* username, int sent_idx, int 
     
     //log_formatted(LOG_DEBUG, "File has %d sentences before insertion", fc->sentence_count);
     
-    if (sent_idx < 0 || sent_idx > fc->sentence_count) { // Changed >= to > - S
+    if (sent_idx < 0 || sent_idx > fc->sentence_count) {
         log_formatted(LOG_ERROR, "Invalid sentence index: %d (file has %d sentences)", 
                      sent_idx, fc->sentence_count);
         free_file_content(fc);
@@ -976,6 +976,62 @@ void* handle_client_request(void* arg) {
             }
             
             case MSG_LOCK_SENTENCE: {
+                /* Validate sentence index against current file content before
+                   attempting to create locks or start a write session. This
+                   prevents creating new sentence slots implicitly when the
+                   requested index is out of bounds. */
+                {
+                    char filepath[MAX_PATH];
+                    snprintf(filepath, sizeof(filepath), "%s/%s", ss.storage_path, msg.filename);
+                    FileContent *fc = init_file_content();
+                    int parsed = parse_file(filepath, fc);
+                    int scount = 0;
+                    if (parsed == 0) {
+                        scount = fc->sentence_count;
+                    } else {
+                        /* file missing or unreadable -> treat as empty */
+                        scount = 0;
+                    }
+
+                    int invalid = 0;
+                    if (scount == 0) {
+                        if (msg.sentence_index != 0) invalid = 1;
+                    } else {
+                        /* Allow indices 0..scount, but if the client requests
+                           exactly scount (append), ensure the last sentence
+                           ends with a delimiter or explicit newline token; if
+                           not, appending a sentence isn't allowed until the
+                           user adds a delimiter. */
+                        if (msg.sentence_index < 0 || msg.sentence_index > scount) {
+                            invalid = 1;
+                        } else if (msg.sentence_index == scount) {
+                            /* check last token of last sentence */
+                            if (scount > 0) {
+                                Sentence *last_sent = &fc->sentences[scount - 1];
+                                if (last_sent->word_count == 0) {
+                                    invalid = 1;
+                                } else {
+                                    char *last_word = last_sent->words[last_sent->word_count - 1];
+                                    int is_nl = (last_word[0] == '\n' && last_word[1] == '\0');
+                                    if (!(is_delimiter(last_word[0]) || is_nl)) {
+                                        invalid = 1;
+                                    }
+                                }
+                            } else {
+                                invalid = 1;
+                            }
+                        }
+                    }
+
+                    free_file_content(fc);
+
+                    if (invalid) {
+                        response.status = ERR_INVALID_INDEX;
+                        send_message(client_sock, &response);
+                        break;
+                    }
+                }
+
                 response.status = lock_sentence_ss(msg.filename, msg.sentence_index, msg.sender);
 
                 if (response.status == SUCCESS) {
