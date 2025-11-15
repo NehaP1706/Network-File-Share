@@ -10,6 +10,18 @@ FileContent* init_file_content() {
     return fc;
 }
 
+// static int is_whitespace_token(const char* tok) {
+//     if(!tok || tok[0]=='\0') return 0;
+//     for(size_t i=0; tok[i]!='\0'; i++) {
+//         char c = tok[i];
+//         if (c == ' ' || c=='\t' || c=='\r') {
+//             return 0; }
+//     }
+//     return 1;
+
+// }
+
+
 void free_file_content(FileContent *fc) {
     if (!fc) return;
     for (int i = 0; i < fc->sentence_count; i++) {
@@ -40,14 +52,17 @@ char** split_by_delimiters(const char *word, int *count) {
             if (buf_idx > 0) {
                 buffer[buf_idx] = '\0';
                 /* trim trailing and leading whitespace from buffer */
-                int start = 0; while (buffer[start] && (buffer[start] == ' ' || buffer[start] == '\t' || buffer[start] == '\r')) start++;
-                int end = buf_idx - 1; while (end >= start && (buffer[end] == ' ' || buffer[end] == '\t' || buffer[end] == '\r')) end--;
-                buffer[end+1] = '\0';
-                if (start == 0) {
-                    parts[*count] = strdup(buffer);
-                } else {
-                    parts[*count] = strdup(buffer + start);
-                }
+                // int start = 0; while (buffer[start] && (buffer[start] == ' ' || buffer[start] == '\t' || buffer[start] == '\r')) start++;
+                // int end = buf_idx - 1; while (end >= start && (buffer[end] == ' ' || buffer[end] == '\t' || buffer[end] == '\r')) end--;
+                // buffer[end+1] = '\0';
+                // if (start == 0) {
+                //     parts[*count] = strdup(buffer);
+                // } else {
+                //     parts[*count] = strdup(buffer + start);
+                // }
+
+                //not trimming spaces - S
+                parts[*count] = strdup(buffer);
                 (*count)++;
                 buf_idx = 0;
                 if (*count >= cap) {
@@ -68,10 +83,13 @@ char** split_by_delimiters(const char *word, int *count) {
             if (buf_idx > 0) {
                 buffer[buf_idx] = '\0';
                 /* trim buffer whitespace */
-                int start = 0; while (buffer[start] && (buffer[start] == ' ' || buffer[start] == '\t' || buffer[start] == '\r')) start++;
-                int end = buf_idx - 1; while (end >= start && (buffer[end] == ' ' || buffer[end] == '\t' || buffer[end] == '\r')) end--;
-                buffer[end+1] = '\0';
-                if (start == 0) parts[*count] = strdup(buffer); else parts[*count] = strdup(buffer + start);
+                // int start = 0; while (buffer[start] && (buffer[start] == ' ' || buffer[start] == '\t' || buffer[start] == '\r')) start++;
+                // int end = buf_idx - 1; while (end >= start && (buffer[end] == ' ' || buffer[end] == '\t' || buffer[end] == '\r')) end--;
+                // buffer[end+1] = '\0';
+                // if (start == 0) parts[*count] = strdup(buffer); else parts[*count] = strdup(buffer + start);
+
+                //not trimming spaces - S
+                parts[*count] = strdup(buffer);
                 (*count)++;
                 buf_idx = 0;
                 
@@ -100,10 +118,13 @@ char** split_by_delimiters(const char *word, int *count) {
     if (buf_idx > 0) {
         buffer[buf_idx] = '\0';
         /* trim buffer whitespace */
-        int start = 0; while (buffer[start] && (buffer[start] == ' ' || buffer[start] == '\t' || buffer[start] == '\r')) start++;
-        int end = buf_idx - 1; while (end >= start && (buffer[end] == ' ' || buffer[end] == '\t' || buffer[end] == '\r')) end--;
-        buffer[end+1] = '\0';
-        if (start == 0) parts[*count] = strdup(buffer); else parts[*count] = strdup(buffer + start);
+        // int start = 0; while (buffer[start] && (buffer[start] == ' ' || buffer[start] == '\t' || buffer[start] == '\r')) start++;
+        // int end = buf_idx - 1; while (end >= start && (buffer[end] == ' ' || buffer[end] == '\t' || buffer[end] == '\r')) end--;
+        // buffer[end+1] = '\0';
+        // if (start == 0) parts[*count] = strdup(buffer); else parts[*count] = strdup(buffer + start);
+
+        //not trimming spaces - S
+        parts[*count] = strdup(buffer);
         (*count)++;
     }
     
@@ -267,6 +288,7 @@ int write_file_content(const char *filepath, FileContent *fc) {
             //     fprintf(file, " ");
             // }
 
+            //not doing this now - S
                 /* Only print a space if:
                - this is not the last word in the sentence, and
                - current token is not a delimiter, and
@@ -275,11 +297,21 @@ int write_file_content(const char *filepath, FileContent *fc) {
                 write_word_to_file(file, fc->sentences[i].words[j]);
 
                 if (j < fc->sentences[i].word_count - 1) {
-                int cur_is_delim = is_delimiter(fc->sentences[i].words[j][0]);
-                int next_is_delim = is_delimiter(fc->sentences[i].words[j + 1][0]);
-                int cur_is_newline = (fc->sentences[i].words[j][0] == '\n' && fc->sentences[i].words[j][1] == '\0');
-                int next_is_newline = (fc->sentences[i].words[j + 1][0] == '\n' && fc->sentences[i].words[j + 1][1] == '\0');
-                if (!cur_is_delim && !next_is_delim && !cur_is_newline && !next_is_newline) {
+                const char* cur = fc->sentences[i].words[j];
+                const char* next = fc->sentences[i].words[j + 1];
+
+                int cur_is_delim = is_delimiter(cur[0]);
+                int next_is_delim = is_delimiter(next[0]);
+                int cur_is_newline = (cur[0] == '\n' && cur[1] == '\0');
+                int next_is_newline = (next[0] == '\n' && next[1] == '\0');
+
+                size_t cur_len = strlen(cur);
+                size_t next_len = strlen(next);
+                int cur_ends_space = cur_len > 0 && isspace((unsigned char)cur[cur_len - 1]);
+                int next_starts_space = next_len > 0 && isspace((unsigned char)next[0]);
+
+                // added some checks - S
+                if (!cur_is_delim && !next_is_delim && !cur_is_newline && !next_is_newline && !cur_ends_space && !next_starts_space) {
                     fprintf(file, " ");
                 }
             }
@@ -293,6 +325,8 @@ int write_file_content(const char *filepath, FileContent *fc) {
             if (fc->sentences[i].word_count > 0) {
                 char *last = fc->sentences[i].words[fc->sentences[i].word_count - 1];
                 if (!(last[0] == '\n' && last[1] == '\0')) {
+                    size_t last_len = strlen(last);
+                    if(!(last_len>0 && isspace((unsigned char)last[last_len - 1])))
                     fprintf(file, " ");
                 }
             } else {
@@ -324,11 +358,19 @@ char* file_content_to_string(FileContent *fc) {
   
 
                 if (j < fc->sentences[i].word_count - 1) {
-                    int cur_is_delim = is_delimiter(fc->sentences[i].words[j][0]);
-                    int next_is_delim = is_delimiter(fc->sentences[i].words[j + 1][0]);
-                    int cur_is_newline = (fc->sentences[i].words[j][0] == '\n' && fc->sentences[i].words[j][1] == '\0');
-                    int next_is_newline = (fc->sentences[i].words[j + 1][0] == '\n' && fc->sentences[i].words[j + 1][1] == '\0');
-                    if (!cur_is_delim && !next_is_delim && !cur_is_newline && !next_is_newline) {
+                    const char *cur = fc->sentences[i].words[j];
+                    const char *next = fc->sentences[i].words[j + 1];
+                    int cur_is_delim = is_delimiter(cur[0]);
+                    int next_is_delim = is_delimiter(next[0]);
+                    int cur_is_newline = (cur[0] == '\n' && cur[1] == '\0');
+                    int next_is_newline = (next[0] == '\n' && next[1] == '\0');
+                    size_t cur_len = strlen(cur);
+                    size_t next_len = strlen(next);
+                    int cur_ends_space = cur_len > 0 && isspace((unsigned char)cur[cur_len - 1]);
+                    int next_starts_space = next_len > 0 && isspace((unsigned char)next[0]);
+
+                    //added some checks - S
+                    if (!cur_is_delim && !next_is_delim && !cur_is_newline && !next_is_newline && !cur_ends_space && !next_starts_space) {
                         result[pos++] = ' ';
                     }
                 }
