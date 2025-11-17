@@ -45,7 +45,44 @@ char** split_by_delimiters(const char *word, int *count) {
     int buf_idx = 0;
     
     for (int i = 0; word[i] != '\0'; i++) {
-        if (word[i] == '\n') {
+        // SPLIT ON SPACES/TABS
+        if (word[i] == ' ' || word[i] == '\t' || word[i] == '\r') {
+            // Save current buffer if not empty
+            if (buf_idx > 0) {
+                buffer[buf_idx] = '\0';
+                parts[*count] = strdup(buffer);
+                (*count)++;
+                buf_idx = 0;
+                if (*count >= cap) {
+                    cap *= 2;
+                    parts = realloc(parts, sizeof(char*) * cap);
+                }
+            }
+            
+            // Collect consecutive spaces
+            char space_buf[MAX_WORD];
+            int space_idx = 0;
+            space_buf[space_idx++] = word[i];
+            
+            // Look ahead for more spaces
+            while (word[i+1] && (word[i+1] == ' ' || word[i+1] == '\t' || word[i+1] == '\r')) {
+                i++;
+                if (space_idx < MAX_WORD - 1) {
+                    space_buf[space_idx++] = word[i];
+                }
+            }
+            
+            // Save space token
+            space_buf[space_idx] = '\0';
+            parts[*count] = strdup(space_buf);
+            (*count)++;
+            
+            if (*count >= cap) {
+                cap *= 2;
+                parts = realloc(parts, sizeof(char*) * cap);
+            }
+        }
+        else if (word[i] == '\n') {
             /* Save current buffer if not empty (trim whitespace) */
             if (buf_idx > 0) {
                 buffer[buf_idx] = '\0';
@@ -341,7 +378,7 @@ int write_file_content(const char *filepath, FileContent *fc) {
                         int next_starts_space = next_len > 0 && isspace((unsigned char)next[0]);
 
                         // added some checks - S
-                        if (!cur_is_delim && !next_is_delim && !cur_is_newline && !next_is_newline && !cur_is_space && !next_is_space && !cur_ends_space && !next_starts_space) {
+                        if (!cur_is_delim && !next_is_delim && !cur_is_newline && !next_is_newline && !cur_is_space && !next_is_space) {
                             fprintf(file, " ");
                         }
 
