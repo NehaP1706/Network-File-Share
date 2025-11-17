@@ -10,17 +10,15 @@ FileContent* init_file_content() {
     return fc;
 }
 
-// static int is_whitespace_token(const char* tok) {
-//     if(!tok || tok[0]=='\0') return 0;
-//     for(size_t i=0; tok[i]!='\0'; i++) {
-//         char c = tok[i];
-//         if (c == ' ' || c=='\t' || c=='\r') {
-//             return 0; }
-//     }
-//     return 1;
-
-// }
-
+static int is_space_token(const char *token) {
+    if (!token || token[0] == '\0') return 0;
+    for (int i = 0; token[i] != '\0'; i++) {
+        if (token[i] != ' ' && token[i] != '\t' && token[i] != '\r') {
+            return 0;
+        }
+    }
+    return 1;
+}
 
 void free_file_content(FileContent *fc) {
     if (!fc) return;
@@ -168,6 +166,34 @@ int parse_file(const char *filepath, FileContent *fc) {
                 
                 word_idx = 0;
             }
+
+            // Collect consecutive spaces/tabs as a single token
+            char space_buf[MAX_WORD];
+            int space_idx = 0;
+            space_buf[space_idx++] = c;
+            
+            // Peek ahead for more spaces/tabs (but not newlines)
+            int next;
+            while ((next = fgetc(file)) != EOF) {
+                if (next == ' ' || next == '\t' || next == '\r') {
+                    if (space_idx < MAX_WORD - 1) {
+                        space_buf[space_idx++] = next;
+                    }
+                } else {
+                    ungetc(next, file);  // Put it back
+                    break;
+                }
+            }
+            
+            // Save the spaces as a token
+            space_buf[space_idx] = '\0';
+            Sentence *sent = &fc->sentences[current_sent];
+            if (sent->word_count >= sent->capacity) {
+                sent->capacity *= 2;
+                sent->words = realloc(sent->words, sizeof(char*) * sent->capacity);
+            }
+            sent->words[sent->word_count++] = strdup(space_buf);
+
         } else if (c == '\n') {
             /* Treat newline as an explicit token so we can preserve it when
                writing files back. We do NOT start a new sentence for a
@@ -297,22 +323,28 @@ int write_file_content(const char *filepath, FileContent *fc) {
                 write_word_to_file(file, fc->sentences[i].words[j]);
 
                 if (j < fc->sentences[i].word_count - 1) {
-                const char* cur = fc->sentences[i].words[j];
-                const char* next = fc->sentences[i].words[j + 1];
+                    const char* cur = fc->sentences[i].words[j];
+                    const char *next = (j + 1 < fc->sentences[i].word_count) ? 
+                               fc->sentences[i].words[j + 1] : NULL;
 
-                int cur_is_delim = is_delimiter(cur[0]);
-                int next_is_delim = is_delimiter(next[0]);
-                int cur_is_newline = (cur[0] == '\n' && cur[1] == '\0');
-                int next_is_newline = (next[0] == '\n' && next[1] == '\0');
+                    if (next) {
+                        int cur_is_delim = is_delimiter(cur[0]);
+                        int next_is_delim = is_delimiter(next[0]);
+                        int cur_is_newline = (cur[0] == '\n' && cur[1] == '\0');
+                        int next_is_newline = (next[0] == '\n' && next[1] == '\0');
+                        int cur_is_space = is_space_token(cur);
+                        int next_is_space = is_space_token(next);
 
-                size_t cur_len = strlen(cur);
-                size_t next_len = strlen(next);
-                int cur_ends_space = cur_len > 0 && isspace((unsigned char)cur[cur_len - 1]);
-                int next_starts_space = next_len > 0 && isspace((unsigned char)next[0]);
+                        size_t cur_len = strlen(cur);
+                        size_t next_len = strlen(next);
+                        int cur_ends_space = cur_len > 0 && isspace((unsigned char)cur[cur_len - 1]);
+                        int next_starts_space = next_len > 0 && isspace((unsigned char)next[0]);
 
-                // added some checks - S
-                if (!cur_is_delim && !next_is_delim && !cur_is_newline && !next_is_newline && !cur_ends_space && !next_starts_space) {
-                    fprintf(file, " ");
+                        // added some checks - S
+                        if (!cur_is_delim && !next_is_delim && !cur_is_newline && !next_is_newline && !cur_is_space && !next_is_space && !cur_ends_space && !next_starts_space) {
+                            fprintf(file, " ");
+                        }
+
                 }
             }
 
@@ -575,9 +607,9 @@ void get_file_stats(const char *filepath, int *word_count, int *char_count) {
     
     while ((c = fgetc(file)) != EOF) {
         // Count non-whitespace, non-delimiter characters for char_count
-        if (c != ' ' && c != '\t' && c != '\n' && c != '\r' && !is_delimiter(c)) {
+        // if (c != ' ' && c != '\t' && c != '\n' && c != '\r' && !is_delimiter(c)) { - N, count everything as a character
             (*char_count)++;
-        }
+        // }
         
         // Count words (sequences of non-whitespace characters)
         if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
@@ -591,7 +623,7 @@ void get_file_stats(const char *filepath, int *word_count, int *char_count) {
                 (*word_count)++;
                 in_word = 0;
             }
-            (*word_count)++;  // The delimiter itself is a word
+            // (*word_count)++;  // The delimiter itself is a word - this is awkward, so not counting it here - N
         } else {
             in_word = 1;
         }
