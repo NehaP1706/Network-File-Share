@@ -74,13 +74,13 @@ char** split_by_delimiters(const char *word, int *count) {
             
             // Save space token
             space_buf[space_idx] = '\0';
-            parts[*count] = strdup(space_buf);
-            (*count)++;
-            
             if (*count >= cap) {
                 cap *= 2;
                 parts = realloc(parts, sizeof(char*) * cap);
             }
+            
+            parts[*count] = strdup(space_buf);
+            (*count)++;
         }
         else if (word[i] == '\n') {
             /* Save current buffer if not empty (trim whitespace) */
@@ -107,12 +107,12 @@ char** split_by_delimiters(const char *word, int *count) {
             }
 
             /* Save newline as separate token */
-            parts[*count] = strdup("\n");
-            (*count)++;
             if (*count >= cap) {
                 cap *= 2;
                 parts = realloc(parts, sizeof(char*) * cap);
             }
+            parts[*count] = strdup("\n");
+            (*count)++;
         } else if (is_delimiter(word[i])) {
             // Save current buffer if not empty
             if (buf_idx > 0) {
@@ -137,13 +137,12 @@ char** split_by_delimiters(const char *word, int *count) {
             // Save delimiter as separate word
             buffer[0] = word[i];
             buffer[1] = '\0';
-            parts[*count] = strdup(buffer);
-            (*count)++;
-            
             if (*count >= cap) {
                 cap *= 2;
                 parts = realloc(parts, sizeof(char*) * cap);
             }
+            parts[*count] = strdup(buffer);
+            (*count)++;
         } else {
             buffer[buf_idx++] = word[i];
         }
@@ -159,8 +158,17 @@ char** split_by_delimiters(const char *word, int *count) {
         // if (start == 0) parts[*count] = strdup(buffer); else parts[*count] = strdup(buffer + start);
 
         //not trimming spaces - S
+        if (*count >= cap) {
+            cap *= 2;
+            parts = realloc(parts, sizeof(char*) * cap);
+        }
         parts[*count] = strdup(buffer);
         (*count)++;
+    }
+
+    for (int i = 0; i < *count; i++) {
+        printf("DEBUG split_by_delimiters part[%d] = '%s' (len=%zu, is_space=%d)\n", 
+            i, parts[i], strlen(parts[i]), is_space_token(parts[i]));
     }
     
     return parts;
@@ -372,18 +380,29 @@ int write_file_content(const char *filepath, FileContent *fc) {
                         int cur_is_space = is_space_token(cur);
                         int next_is_space = is_space_token(next);
 
+                        // NEVER add space if current or next is a space token
+                        // Space tokens contain their own spacing
+                        if (cur_is_space || next_is_space) {
+                            // Don't add any space - the space token handles it
+                            continue;
+                        }
+
                         size_t cur_len = strlen(cur);
                         size_t next_len = strlen(next);
                         int cur_ends_space = cur_len > 0 && isspace((unsigned char)cur[cur_len - 1]);
                         int next_starts_space = next_len > 0 && isspace((unsigned char)next[0]);
 
                         // added some checks - S
-                        if (!cur_is_delim && !next_is_delim && !cur_is_newline && !next_is_newline && !cur_is_space && !next_is_space) {
+                        if (!cur_is_delim && !next_is_delim && 
+                            !cur_is_newline && !next_is_newline && 
+                            !cur_ends_space && !next_starts_space) {
                             fprintf(file, " ");
                         }
 
+                    }
                 }
-            }
+
+            printf("DEBUG write token[%d][%d] = '%s' (is_space=%d)\n", i, j, fc->sentences[i].words[j], is_space_token(fc->sentences[i].words[j]));
 
         }
         
@@ -433,6 +452,13 @@ char* file_content_to_string(FileContent *fc) {
                     int next_is_delim = is_delimiter(next[0]);
                     int cur_is_newline = (cur[0] == '\n' && cur[1] == '\0');
                     int next_is_newline = (next[0] == '\n' && next[1] == '\0');
+                    int cur_is_space = is_space_token(cur);
+                    int next_is_space = is_space_token(next);
+
+                    if (cur_is_space || next_is_space) {
+                        continue;
+                    }
+
                     size_t cur_len = strlen(cur);
                     size_t next_len = strlen(next);
                     int cur_ends_space = cur_len > 0 && isspace((unsigned char)cur[cur_len - 1]);

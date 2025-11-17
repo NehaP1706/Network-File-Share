@@ -623,9 +623,26 @@ void handle_write(char *filename, char *sent_idx_str) {
         int word_idx;
         char content[MAX_BUFFER];
         
-        if (sscanf(line, "%d %[^\n]", &word_idx, content) != 2) {
+        char *first_space = strchr(line, ' ');
+    
+        if (!first_space) {
             printf("Invalid format. Use: <word_index> <content>\n");
             continue;
+        }
+        
+        // Parse word index
+        if (sscanf(line, "%d", &word_idx) != 1) {
+            printf("Invalid format. Use: <word_index> <content>\n");
+            continue;
+        }
+        
+        // Everything after first space is content (preserving all spaces)
+        strcpy(content, first_space + 1);
+        
+        // Remove only the trailing newline if present (NOT leading spaces!)
+        size_t content_len = strlen(content);
+        if (content_len > 0 && content[content_len - 1] == '\n') {
+            content[content_len - 1] = '\0';
         }
 
         process_escape_sequences(content);
