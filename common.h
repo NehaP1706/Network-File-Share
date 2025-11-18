@@ -197,6 +197,8 @@ typedef struct {
     char username[MAX_USERNAME];
     time_t first_registered;
     time_t last_seen;
+    int active_session;      // NEW: 1 if user has active session, 0 otherwise
+    int client_sock;         // NEW: Socket of active session (for validation)
 } RegisteredUser;
 
 // Function declarations

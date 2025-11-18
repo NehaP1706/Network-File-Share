@@ -176,6 +176,7 @@ void connect_to_nm() {
         log_formatted(LOG_INFO, "Connected to NM at %s:%d", client.nm_ip, client.nm_port);
     } else {
         printf("[Client] Registration failed\n");
+        log_formatted(LOG_ERROR, "Registration failed: %s", response.data);
         exit(1);
     }
 }

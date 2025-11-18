@@ -78,10 +78,16 @@ void init_name_server() {
     nm.registered_user_count = 0;
     nm.request_count = 0;
     
-    // ADD: Initialize per-SS socket mutexes - N
+    // Initialize registered users array
+    for (int i = 0; i < MAX_CLIENTS * 10; i++) {
+        nm.registered_users[i].active_session = 0;
+        nm.registered_users[i].client_sock = -1;
+    }
+    
+    // Initialize per-SS socket mutexes
     for (int i = 0; i < MAX_SS; i++) {
         pthread_mutex_init(&nm.ss_sock_mutexes[i], NULL);
-        nm.ss_list[i].hb_sock = -1;  // Initialize all to -1, set later - N
+        nm.ss_list[i].hb_sock = -1;
     }
     
     set_instance_name("NM");
@@ -92,16 +98,29 @@ void init_name_server() {
     printf("[NM] Client Port: %d\n", NM_CLIENT_PORT);
 }
 
-void register_user_persistent(const char *username) {
+void register_user_persistent(const char *username, int client_sock, int *is_duplicate) {
     pthread_mutex_lock(&nm.registered_users_mutex);
+    
+    *is_duplicate = 0;
     
     // Check if user already exists
     for (int i = 0; i < nm.registered_user_count; i++) {
         if (strcmp(nm.registered_users[i].username, username) == 0) {
-            // Update last seen time
+            // Check if user already has an active session
+            if (nm.registered_users[i].active_session) {
+                log_formatted(LOG_WARNING, "User %s attempted duplicate login (already connected on socket %d)", 
+                             username, nm.registered_users[i].client_sock);
+                *is_duplicate = 1;
+                pthread_mutex_unlock(&nm.registered_users_mutex);
+                return;
+            }
+            
+            // User exists but no active session - allow reconnection
             nm.registered_users[i].last_seen = time(NULL);
+            nm.registered_users[i].active_session = 1;
+            nm.registered_users[i].client_sock = client_sock;
             pthread_mutex_unlock(&nm.registered_users_mutex);
-            log_formatted(LOG_INFO, "User %s reconnected", username);
+            log_formatted(LOG_INFO, "User %s reconnected on socket %d", username, client_sock);
             return;
         }
     }
@@ -111,11 +130,32 @@ void register_user_persistent(const char *username) {
         strcpy(nm.registered_users[nm.registered_user_count].username, username);
         nm.registered_users[nm.registered_user_count].first_registered = time(NULL);
         nm.registered_users[nm.registered_user_count].last_seen = time(NULL);
+        nm.registered_users[nm.registered_user_count].active_session = 1;
+        nm.registered_users[nm.registered_user_count].client_sock = client_sock;
         nm.registered_user_count++;
-        log_formatted(LOG_INFO, "New user registered: %s (total: %d)", 
-                     username, nm.registered_user_count);
+        log_formatted(LOG_INFO, "New user registered: %s on socket %d (total: %d)", 
+                     username, client_sock, nm.registered_user_count);
     } else {
         log_formatted(LOG_ERROR, "Cannot register user %s: registry full", username);
+        *is_duplicate = 1;  // Treat as failure
+    }
+    
+    pthread_mutex_unlock(&nm.registered_users_mutex);
+}
+
+void deregister_active_session(const char *username, int client_sock) {
+    pthread_mutex_lock(&nm.registered_users_mutex);
+    
+    for (int i = 0; i < nm.registered_user_count; i++) {
+        if (strcmp(nm.registered_users[i].username, username) == 0) {
+            if (nm.registered_users[i].client_sock == client_sock) {
+                nm.registered_users[i].active_session = 0;
+                nm.registered_users[i].client_sock = -1;
+                nm.registered_users[i].last_seen = time(NULL);
+                log_formatted(LOG_INFO, "User %s session ended (socket %d)", username, client_sock);
+            }
+            break;
+        }
     }
     
     pthread_mutex_unlock(&nm.registered_users_mutex);
@@ -1486,11 +1526,27 @@ void* handle_client_connection(void* arg) {
         return NULL;
     }
     
-    register_user_persistent(msg.sender);
+    int is_duplicate = 0;
+    register_user_persistent(msg.sender, client_sock, &is_duplicate);
+    
+    if (is_duplicate) {
+        // Send error response
+        Message response;
+        init_message(&response);
+        response.status = ERR_INVALID_OPERATION;
+        strcpy(response.data, "User already logged in from another session");
+        send_message(client_sock, &response);
+        
+        log_formatted(LOG_WARNING, "Rejected duplicate login attempt for user %s", msg.sender);
+        close(client_sock);
+        return NULL;
+    }
+
     pthread_mutex_lock(&nm.client_mutex);
     
     if (nm.client_count >= MAX_CLIENTS) {
         pthread_mutex_unlock(&nm.client_mutex);
+        deregister_active_session(msg.sender, client_sock);
         close(client_sock);
         return NULL;
     }
@@ -1633,6 +1689,9 @@ void* handle_client_connection(void* arg) {
         }
     }
     
+     char username[MAX_USERNAME];
+    strcpy(username, nm.client_list[idx].username);
+    
     pthread_mutex_lock(&nm.client_mutex);
     for (int i = 0; i < nm.client_count; i++) {
         if (nm.client_list[i].sock == client_sock) {
@@ -1644,6 +1703,9 @@ void* handle_client_connection(void* arg) {
         }
     }
     pthread_mutex_unlock(&nm.client_mutex);
+    
+    // Deregister the active session
+    deregister_active_session(username, client_sock);
     
     close(client_sock);
     return NULL;
