@@ -44,6 +44,7 @@ typedef struct {
     int sentence_idx;
     char temp_filepath[MAX_PATH];
     int active;
+    int original_sentence_count;  // Sentences in file when lock was acquired
 } WriteSession;
 
 WriteSession write_sessions[MAX_CLIENTS*10];
@@ -179,26 +180,93 @@ int start_write_session_ss(const char *filename, const char *username, int sent_
     return SUCCESS;
 }
 
+// In ss.c - Updated WriteSession structure
+typedef struct {
+    char filename[MAX_FILENAME];
+    char username[MAX_FILENAME];
+    int sentence_idx;
+    char temp_filepath[MAX_PATH];
+    int active;
+    int original_sentence_count;  // Sentences in file when lock was acquired
+} WriteSession;
+
+// Updated start_write_session_ss function
+int start_write_session_ss(const char *filename, const char *username, int sent_idx) {
+    char filepath[MAX_PATH];
+    snprintf(filepath, sizeof(filepath), "%s/%s", ss.storage_path, filename);
+    
+    // Parse current file to get sentence count
+    FileContent *fc = init_file_content();
+    int parsed = parse_file(filepath, fc);
+    int original_sentence_count = parsed == 0 ? fc->sentence_count : 0;
+    free_file_content(fc);
+    
+    // Create write session
+    WriteSession *session = get_write_session(filename, username, sent_idx, 1);
+    if (!session) {
+        log_formatted(LOG_ERROR, "Failed to create write session");
+        return ERR_SERVER_ERROR;
+    }
+    
+    // Store original sentence count
+    session->original_sentence_count = original_sentence_count;
+    
+    // Copy current file content to temp file
+    FILE *src = fopen(filepath, "r");
+    if (!src) {
+        FILE *temp = fopen(session->temp_filepath, "w");
+        if (!temp) {
+            remove_write_session(filename, username, sent_idx);
+            return ERR_SERVER_ERROR;
+        }
+        fclose(temp);
+        log_formatted(LOG_INFO, "Created empty temp file for write session");
+        return SUCCESS;
+    }
+    
+    FILE *temp = fopen(session->temp_filepath, "w");
+    if (!temp) {
+        fclose(src);
+        remove_write_session(filename, username, sent_idx);
+        return ERR_SERVER_ERROR;
+    }
+    
+    char buffer[MAX_BUFFER];
+    size_t bytes;
+    while ((bytes = fread(buffer, 1, sizeof(buffer), src)) > 0) {
+        fwrite(buffer, 1, bytes, temp);
+    }
+    
+    fclose(src);
+    fclose(temp);
+    
+    log_formatted(LOG_INFO, "Started write session: %s by %s on sentence %d (file had %d sentences)", 
+                 filename, username, sent_idx, original_sentence_count);
+    return SUCCESS;
+}
+
+// KEY FIX: Simplified commit logic that leverages the fact that only ONE sentence is modified
 int commit_write_session_ss(const char *filename, const char *username, int sent_idx) {
     WriteSession *session = get_write_session(filename, username, sent_idx, 0);
     if (!session) {
         log_formatted(LOG_WARNING, "No write session to commit");
-        return SUCCESS; // Not an error, maybe already committed
+        return SUCCESS;
     }
     
     char filepath[MAX_PATH];
     snprintf(filepath, sizeof(filepath), "%s/%s", ss.storage_path, filename);
     
-    // Create undo backup of main file before merging
+    // Create undo backup before merging
     if (create_undo_backup(filepath) != 0) {
         log_formatted(LOG_WARNING, "Could not create undo backup before merge");
     }
     
-    // Parse both files
+    // Parse CURRENT main file (may have been modified by other commits)
     FileContent *main_fc = init_file_content();
-    FileContent *temp_fc = init_file_content();
-    
     int main_parsed = (parse_file(filepath, main_fc) == 0);
+    
+    // Parse temp file (contains this user's modifications to sentence sent_idx)
+    FileContent *temp_fc = init_file_content();
     int temp_parsed = (parse_file(session->temp_filepath, temp_fc) == 0);
     
     if (!temp_parsed) {
@@ -210,7 +278,7 @@ int commit_write_session_ss(const char *filename, const char *username, int sent
     }
     
     if (!main_parsed) {
-        // Main file is empty/new, just use temp file
+        // Main file is empty/new, just use temp file as-is
         log_formatted(LOG_INFO, "Main file empty, using temp file as-is");
         if (write_file_content(filepath, temp_fc) != 0) {
             free_file_content(main_fc);
@@ -218,69 +286,92 @@ int commit_write_session_ss(const char *filename, const char *username, int sent
             return ERR_SERVER_ERROR;
         }
     } else {
-        // Merge: splice temp file's sentences into main at sent_idx.
-        if (sent_idx < temp_fc->sentence_count) {
-            int before = sent_idx; // sentences to keep from main before index
-            int temp_to_insert = temp_fc->sentence_count - sent_idx; // number of sentences from temp starting at sent_idx
-            int after = 0;
-            if (main_fc->sentence_count > sent_idx + 1) {
-                after = main_fc->sentence_count - (sent_idx + 1);
-            }
-
-            int new_total = before + temp_to_insert + after;
-            Sentence *new_sentences = malloc(sizeof(Sentence) * new_total);
-            if (!new_sentences) {
-                free_file_content(main_fc);
-                free_file_content(temp_fc);
-                return ERR_SERVER_ERROR;
-            }
-
-            // copy sentences before sent_idx from main (transfer ownership)
-            for (int i = 0; i < before; i++) {
-                new_sentences[i] = main_fc->sentences[i];
-            }
-
-            // copy sentences from temp starting at sent_idx (transfer ownership)
-            for (int i = 0; i < temp_to_insert; i++) {
-                new_sentences[before + i] = temp_fc->sentences[sent_idx + i];
-                // null out temp entries so free_file_content won't double-free
-                temp_fc->sentences[sent_idx + i].words = NULL;
-                temp_fc->sentences[sent_idx + i].word_count = 0;
-                temp_fc->sentences[sent_idx + i].capacity = 0;
-            }
-
-            // copy remaining sentences from main after sent_idx
-            for (int i = 0; i < after; i++) {
-                new_sentences[before + temp_to_insert + i] = main_fc->sentences[sent_idx + 1 + i];
-            }
-
-            // Free main's sentences array (but not the words we transferred)
-            free(main_fc->sentences);
-            main_fc->sentences = new_sentences;
-            main_fc->sentence_count = new_total;
-
-            log_formatted(LOG_INFO, "Spliced %d temp sentences into main at %d", temp_to_insert, sent_idx);
-        } else if (sent_idx >= main_fc->sentence_count && sent_idx < temp_fc->sentence_count) {
-            // Temp file has new sentences beyond main's end, append them
-            log_formatted(LOG_INFO, "Appending new sentences from temp file");
-
-            int temp_count = temp_fc->sentence_count - sent_idx;
-            int new_total = main_fc->sentence_count + temp_count;
-            if (new_total > main_fc->capacity) {
-                while (main_fc->capacity < new_total) main_fc->capacity *= 2;
-                main_fc->sentences = realloc(main_fc->sentences, sizeof(Sentence) * main_fc->capacity);
-            }
-
-            for (int i = 0; i < temp_count; i++) {
-                main_fc->sentences[main_fc->sentence_count + i] = temp_fc->sentences[sent_idx + i];
-                temp_fc->sentences[sent_idx + i].words = NULL;
-                temp_fc->sentences[sent_idx + i].word_count = 0;
-                temp_fc->sentences[sent_idx + i].capacity = 0;
-            }
-            main_fc->sentence_count = new_total;
+        // KEY INSIGHT: We locked sentence sent_idx when the file had 
+        // original_sentence_count sentences. Now we need to:
+        // 1. Calculate how many sentences the locked sentence became (in temp)
+        // 2. Replace ONLY that sentence in the current main file
+        
+        int original_count = session->original_sentence_count;
+        int temp_count = temp_fc->sentence_count;
+        
+        // How many sentences did the locked sentence expand to?
+        // If temp has more sentences than original, the difference is the expansion
+        int sentence_expansion = temp_count - original_count;
+        int modified_sentence_count = 1 + sentence_expansion;  // At least 1 sentence
+        
+        log_formatted(LOG_INFO, "Merging: main has %d sentences, temp has %d (was %d), "
+                     "sentence %d expanded to %d sentence(s)",
+                     main_fc->sentence_count, temp_count, original_count, 
+                     sent_idx, modified_sentence_count);
+        
+        // Validate that sent_idx still exists in current main
+        if (sent_idx >= main_fc->sentence_count) {
+            log_formatted(LOG_ERROR, "Sentence %d no longer exists in main file (has %d sentences)",
+                         sent_idx, main_fc->sentence_count);
+            free_file_content(main_fc);
+            free_file_content(temp_fc);
+            remove_write_session(filename, username, sent_idx);
+            return ERR_SERVER_ERROR;
         }
-
-        // Write merged content back
+        
+        // Build new sentence array
+        // New total = (sentences before sent_idx) + (modified sentences) + (sentences after sent_idx)
+        int new_total = main_fc->sentence_count + sentence_expansion;
+        Sentence *new_sentences = malloc(sizeof(Sentence) * (new_total > 0 ? new_total : 1));
+        if (!new_sentences) {
+            free_file_content(main_fc);
+            free_file_content(temp_fc);
+            return ERR_SERVER_ERROR;
+        }
+        
+        int new_idx = 0;
+        
+        // Step 1: Copy all sentences BEFORE sent_idx from current main
+        // (these may have been modified by other concurrent writes)
+        for (int i = 0; i < sent_idx; i++) {
+            new_sentences[new_idx++] = main_fc->sentences[i];
+        }
+        
+        // Step 2: Insert the modified sentence(s) from temp (deep copy)
+        // Extract sentences [sent_idx, sent_idx + modified_sentence_count) from temp
+        for (int i = 0; i < modified_sentence_count && (sent_idx + i) < temp_fc->sentence_count; i++) {
+            Sentence *src = &temp_fc->sentences[sent_idx + i];
+            
+            new_sentences[new_idx].capacity = src->word_count > 10 ? src->word_count : 10;
+            new_sentences[new_idx].word_count = src->word_count;
+            new_sentences[new_idx].words = malloc(sizeof(char*) * new_sentences[new_idx].capacity);
+            
+            // Deep copy all words
+            for (int j = 0; j < src->word_count; j++) {
+                new_sentences[new_idx].words[j] = strdup(src->words[j]);
+            }
+            new_idx++;
+        }
+        
+        // Step 3: Copy all sentences AFTER sent_idx from current main
+        // (these may have been modified by other concurrent writes)
+        for (int i = sent_idx + 1; i < main_fc->sentence_count; i++) {
+            new_sentences[new_idx++] = main_fc->sentences[i];
+        }
+        
+        log_formatted(LOG_INFO, "Built merged content with %d sentences (expected %d)",
+                     new_idx, new_total);
+        
+        // Sanity check
+        if (new_idx != new_total) {
+            log_formatted(LOG_WARNING, "Sentence count mismatch: got %d, expected %d",
+                         new_idx, new_total);
+        }
+        
+        // Replace main's sentences array
+        // NOTE: We're transferring ownership of sentences before and after sent_idx,
+        // so we only free the array itself, not the sentences
+        free(main_fc->sentences);
+        main_fc->sentences = new_sentences;
+        main_fc->sentence_count = new_idx;
+        main_fc->capacity = new_total;
+        
+        // Write merged content back to disk
         if (write_file_content(filepath, main_fc) != 0) {
             log_formatted(LOG_ERROR, "Failed to write merged content");
             free_file_content(main_fc);
@@ -303,8 +394,8 @@ int commit_write_session_ss(const char *filename, const char *username, int sent
     
     // Clean up write session
     remove_write_session(filename, username, sent_idx);
-    printf("Completed one write op!\n");
-    log_formatted(LOG_INFO, "Committed write session for %s by %s", filename, username);
+    log_formatted(LOG_INFO, "Successfully committed write session for %s by %s on sentence %d", 
+                 filename, username, sent_idx);
     return SUCCESS;
 }
 
