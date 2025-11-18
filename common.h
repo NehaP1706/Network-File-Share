@@ -201,6 +201,33 @@ typedef struct {
     int client_sock;         // NEW: Socket of active session (for validation)
 } RegisteredUser;
 
+typedef struct CommitQueueEntry {
+    char filename[MAX_FILENAME];
+    char username[MAX_FILENAME];
+    int sentence_idx;
+    int original_sentence_count;
+    char temp_filepath[MAX_PATH];
+    time_t lock_time;
+    struct CommitQueueEntry *next;
+} CommitQueueEntry;
+
+typedef struct {
+    char filename[MAX_FILENAME];
+    CommitQueueEntry *head;
+    CommitQueueEntry *tail;
+    pthread_mutex_t mutex;
+} FileCommitQueue;
+
+typedef struct {
+    char filename[MAX_FILENAME];
+    char username[MAX_FILENAME];
+    int sentence_idx;
+    char temp_filepath[MAX_PATH];
+    int active;
+    int original_sentence_count;
+    time_t lock_time;  // Track when lock was acquired
+} WriteSession;
+
 // Function declarations
 void init_message(Message *msg);
 int send_message(int sock, Message *msg);

@@ -38,18 +38,14 @@ typedef struct {
     volatile int running;
 } StorageServer;
 
-typedef struct {
-    char filename[MAX_FILENAME];
-    char username[MAX_FILENAME];
-    int sentence_idx;
-    char temp_filepath[MAX_PATH];
-    int active;
-    int original_sentence_count;  // Sentences in file when lock was acquired
-} WriteSession;
-
 WriteSession write_sessions[MAX_CLIENTS*10];
 int write_session_count = 0;
 pthread_mutex_t write_sessions_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+#define MAX_FILE_QUEUES 100
+FileCommitQueue commit_queues[MAX_FILE_QUEUES];
+int commit_queue_count = 0;
+pthread_mutex_t commit_queues_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 StorageServer ss;
 
@@ -72,6 +68,269 @@ WriteSession* get_write_session(const char* filename, const char* username, int 
 void remove_write_session(const char* filename, const char* username, int sent_idx);
 int commit_write_session_ss(const char* filename, const char* username, int sent_idx);
 int cancel_write_session_ss(const char* filename, const char* username, int sent_idx);
+
+FileCommitQueue* get_commit_queue(const char *filename) {
+    pthread_mutex_lock(&commit_queues_mutex);
+    
+    // Find existing queue
+    for (int i = 0; i < commit_queue_count; i++) {
+        if (strcmp(commit_queues[i].filename, filename) == 0) {
+            pthread_mutex_unlock(&commit_queues_mutex);
+            return &commit_queues[i];
+        }
+    }
+    
+    // Create new queue
+    if (commit_queue_count >= MAX_FILE_QUEUES) {
+        pthread_mutex_unlock(&commit_queues_mutex);
+        return NULL;
+    }
+    
+    FileCommitQueue *queue = &commit_queues[commit_queue_count++];
+    strcpy(queue->filename, filename);
+    queue->head = NULL;
+    queue->tail = NULL;
+    pthread_mutex_init(&queue->mutex, NULL);
+    
+    pthread_mutex_unlock(&commit_queues_mutex);
+    return queue;
+}
+
+// Add commit to queue (sorted by lock_time - FIFO order)
+int enqueue_commit(const char *filename, const char *username, int sent_idx, 
+                   int original_count, const char *temp_path, time_t lock_time) {
+    FileCommitQueue *queue = get_commit_queue(filename);
+    if (!queue) return -1;
+    
+    CommitQueueEntry *entry = malloc(sizeof(CommitQueueEntry));
+    strcpy(entry->filename, filename);
+    strcpy(entry->username, username);
+    entry->sentence_idx = sent_idx;
+    entry->original_sentence_count = original_count;
+    strcpy(entry->temp_filepath, temp_path);
+    entry->lock_time = lock_time;
+    entry->next = NULL;
+    
+    pthread_mutex_lock(&queue->mutex);
+    
+    if (queue->tail == NULL) {
+        queue->head = queue->tail = entry;
+    } else {
+        queue->tail->next = entry;
+        queue->tail = entry;
+    }
+    
+    pthread_mutex_unlock(&queue->mutex);
+    
+    log_formatted(LOG_INFO, "Enqueued commit for %s by %s (sentence %d, locked at %ld)", 
+                  filename, username, sent_idx, lock_time);
+    return 0;
+}
+
+// Process all pending commits for a file sequentially
+int process_commit_queue(const char *filename) {
+    FileCommitQueue *queue = get_commit_queue(filename);
+    if (!queue) return 0;
+    
+    pthread_mutex_lock(&queue->mutex);
+    
+    int processed = 0;
+    char filepath[MAX_PATH];
+    snprintf(filepath, sizeof(filepath), "%s/%s", ss.storage_path, filename);
+    
+    // Create initial backup before processing queue
+    if (queue->head != NULL) {
+        if (create_undo_backup(filepath) != 0) {
+            log_formatted(LOG_WARNING, "Could not create undo backup before commit queue processing");
+        }
+    }
+    
+    while (queue->head != NULL) {
+        CommitQueueEntry *entry = queue->head;
+        
+        log_formatted(LOG_INFO, "Processing queued commit: %s by %s (sentence %d, original_count=%d)",
+                      entry->filename, entry->username, entry->sentence_idx, entry->original_sentence_count);
+        
+        // Parse CURRENT main file state
+        FileContent *main_fc = init_file_content();
+        int main_parsed = (parse_file(filepath, main_fc) == 0);
+        int current_sentence_count = main_parsed ? main_fc->sentence_count : 0;
+        
+        // Parse temp file (user's modifications)
+        FileContent *temp_fc = init_file_content();
+        int temp_parsed = (parse_file(entry->temp_filepath, temp_fc) == 0);
+        
+        if (!temp_parsed) {
+            log_formatted(LOG_ERROR, "Failed to parse temp file, skipping commit");
+            free_file_content(main_fc);
+            free_file_content(temp_fc);
+            
+            // Remove from queue and continue
+            queue->head = entry->next;
+            if (queue->head == NULL) queue->tail = NULL;
+            unlink(entry->temp_filepath);
+            free(entry);
+            continue;
+        }
+        
+        // Calculate sentence mapping
+        // When this user locked sentence X, the file had original_sentence_count sentences
+        // Now the file has current_sentence_count sentences
+        // We need to figure out where sentence X is NOW after previous commits
+        
+        int sentence_shift = current_sentence_count - entry->original_sentence_count;
+        int adjusted_idx = entry->sentence_idx + sentence_shift;
+        
+        log_formatted(LOG_INFO, "Sentence mapping: original_idx=%d, shift=%d, adjusted_idx=%d (current_count=%d)",
+                      entry->sentence_idx, sentence_shift, adjusted_idx, current_sentence_count);
+        
+        // Validate adjusted index
+        // Special case: if both original and current are 0 (empty file), allow idx 0
+        if (current_sentence_count == 0 && entry->original_sentence_count == 0 && adjusted_idx == 0) {
+            // This is fine - writing to an empty file
+            log_formatted(LOG_INFO, "Writing to empty file, adjusted_idx=0 is valid");
+        } else if (adjusted_idx < 0 || adjusted_idx >= current_sentence_count) {
+            log_formatted(LOG_ERROR, "Adjusted sentence index %d out of bounds (current file has %d sentences), skipping commit",
+                          adjusted_idx, current_sentence_count);
+            free_file_content(main_fc);
+            free_file_content(temp_fc);
+            
+            queue->head = entry->next;
+            if (queue->head == NULL) queue->tail = NULL;
+            unlink(entry->temp_filepath);
+            free(entry);
+            continue;
+        }
+        
+        // Extract modified sentence(s) from temp file
+        // The modified sentence is at entry->sentence_idx in the temp file
+        int temp_original_count = entry->original_sentence_count;
+        int temp_current_count = temp_fc->sentence_count;
+        int sentence_expansion = temp_current_count - temp_original_count;
+        int modified_sentence_count = 1 + sentence_expansion;
+        
+        log_formatted(LOG_INFO, "Sentence expansion: temp had %d originally, now has %d, expansion=%d",
+                      temp_original_count, temp_current_count, sentence_expansion);
+        
+        // Build merged content
+        int new_total;
+        Sentence *new_sentences;
+        
+        if (current_sentence_count == 0) {
+            // Empty file case - just use temp file content directly
+            log_formatted(LOG_INFO, "Empty file - using temp file content as-is");
+            new_total = temp_fc->sentence_count;
+            new_sentences = malloc(sizeof(Sentence) * (new_total > 0 ? new_total : 1));
+            if (!new_sentences) {
+                log_formatted(LOG_ERROR, "Out of memory during merge");
+                free_file_content(main_fc);
+                free_file_content(temp_fc);
+                pthread_mutex_unlock(&queue->mutex);
+                return -1;
+            }
+            
+            // Deep copy all sentences from temp
+            for (int i = 0; i < temp_fc->sentence_count; i++) {
+                Sentence *src = &temp_fc->sentences[i];
+                new_sentences[i].capacity = src->word_count > 10 ? src->word_count : 10;
+                new_sentences[i].word_count = src->word_count;
+                new_sentences[i].words = malloc(sizeof(char*) * new_sentences[i].capacity);
+                
+                for (int j = 0; j < src->word_count; j++) {
+                    new_sentences[i].words[j] = strdup(src->words[j]);
+                }
+            }
+            
+            // Update main file content
+            free(main_fc->sentences);
+            main_fc->sentences = new_sentences;
+            main_fc->sentence_count = new_total;
+            main_fc->capacity = new_total;
+        } else {
+            // Non-empty file - do normal merge
+            new_total = current_sentence_count + sentence_expansion;
+            new_sentences = malloc(sizeof(Sentence) * (new_total > 0 ? new_total : 1));
+            if (!new_sentences) {
+                log_formatted(LOG_ERROR, "Out of memory during merge");
+                free_file_content(main_fc);
+                free_file_content(temp_fc);
+                pthread_mutex_unlock(&queue->mutex);
+                return -1;
+            }
+            
+            int new_idx = 0;
+            
+            // Step 1: Copy sentences BEFORE adjusted_idx from current main
+            for (int i = 0; i < adjusted_idx && i < current_sentence_count; i++) {
+                new_sentences[new_idx++] = main_fc->sentences[i];
+            }
+            
+            // Step 2: Insert modified sentence(s) from temp (deep copy)
+            for (int i = 0; i < modified_sentence_count && (entry->sentence_idx + i) < temp_fc->sentence_count; i++) {
+                Sentence *src = &temp_fc->sentences[entry->sentence_idx + i];
+                
+                new_sentences[new_idx].capacity = src->word_count > 10 ? src->word_count : 10;
+                new_sentences[new_idx].word_count = src->word_count;
+                new_sentences[new_idx].words = malloc(sizeof(char*) * new_sentences[new_idx].capacity);
+                
+                for (int j = 0; j < src->word_count; j++) {
+                    new_sentences[new_idx].words[j] = strdup(src->words[j]);
+                }
+                new_idx++;
+            }
+            
+            // Step 3: Copy sentences AFTER adjusted_idx from current main
+            for (int i = adjusted_idx + 1; i < current_sentence_count; i++) {
+                new_sentences[new_idx++] = main_fc->sentences[i];
+            }
+            
+            log_formatted(LOG_INFO, "Merged content: %d sentences (expected %d)", new_idx, new_total);
+            
+            // Update main file content
+            free(main_fc->sentences);
+            main_fc->sentences = new_sentences;
+            main_fc->sentence_count = new_idx;
+            main_fc->capacity = new_total;
+        }
+        
+        // Write back to disk
+        if (write_file_content(filepath, main_fc) != 0) {
+            log_formatted(LOG_ERROR, "Failed to write merged content");
+            free_file_content(main_fc);
+            free_file_content(temp_fc);
+            pthread_mutex_unlock(&queue->mutex);
+            return -1;
+        }
+        
+        // Update timestamps
+        struct stat st;
+        if (stat(filepath, &st) == 0) {
+            struct utimbuf times;
+            times.actime = time(NULL);
+            times.modtime = time(NULL);
+            utime(filepath, &times);
+        }
+        
+        free_file_content(main_fc);
+        free_file_content(temp_fc);
+        
+        // Clean up
+        unlink(entry->temp_filepath);
+        
+        // Remove from queue
+        queue->head = entry->next;
+        if (queue->head == NULL) queue->tail = NULL;
+        free(entry);
+        
+        processed++;
+        log_formatted(LOG_INFO, "Successfully processed commit %d for %s", processed, filename);
+    }
+    
+    pthread_mutex_unlock(&queue->mutex);
+    
+    log_formatted(LOG_INFO, "Processed %d commits for %s", processed, filename);
+    return processed;
+}
 
 WriteSession* get_write_session(const char *filename, const char *username, int sent_idx, int create) {
     pthread_mutex_lock(&write_sessions_mutex);
@@ -133,63 +392,6 @@ void remove_write_session(const char *filename, const char *username, int sent_i
     pthread_mutex_unlock(&write_sessions_mutex);
 }
 
-int start_write_session_ss(const char *filename, const char *username, int sent_idx) {
-    char filepath[MAX_PATH];
-    snprintf(filepath, sizeof(filepath), "%s/%s", ss.storage_path, filename);
-    
-    // Create write session
-    WriteSession *session = get_write_session(filename, username, sent_idx, 1);
-    if (!session) {
-        log_formatted(LOG_ERROR, "Failed to create write session");
-        return ERR_SERVER_ERROR;
-    }
-    
-    // Copy current file content to temp file
-    FILE *src = fopen(filepath, "r");
-    if (!src) {
-        // File might be empty, create empty temp file
-        FILE *temp = fopen(session->temp_filepath, "w");
-        if (!temp) {
-            remove_write_session(filename, username, sent_idx);
-            return ERR_SERVER_ERROR;
-        }
-        fclose(temp);
-        log_formatted(LOG_INFO, "Created empty temp file for write session");
-        return SUCCESS;
-    }
-    
-    FILE *temp = fopen(session->temp_filepath, "w");
-    if (!temp) {
-        fclose(src);
-        remove_write_session(filename, username, sent_idx);
-        return ERR_SERVER_ERROR;
-    }
-    
-    // Copy content
-    char buffer[MAX_BUFFER];
-    size_t bytes;
-    while ((bytes = fread(buffer, 1, sizeof(buffer), src)) > 0) {
-        fwrite(buffer, 1, bytes, temp);
-    }
-    
-    fclose(src);
-    fclose(temp);
-    
-    log_formatted(LOG_INFO, "Started write session: %s by %s on sentence %d", 
-                 filename, username, sent_idx);
-    return SUCCESS;
-}
-
-// In ss.c - Updated WriteSession structure
-typedef struct {
-    char filename[MAX_FILENAME];
-    char username[MAX_FILENAME];
-    int sentence_idx;
-    char temp_filepath[MAX_PATH];
-    int active;
-    int original_sentence_count;  // Sentences in file when lock was acquired
-} WriteSession;
-
 // Updated start_write_session_ss function
 int start_write_session_ss(const char *filename, const char *username, int sent_idx) {
     char filepath[MAX_PATH];
@@ -208,8 +410,9 @@ int start_write_session_ss(const char *filename, const char *username, int sent_
         return ERR_SERVER_ERROR;
     }
     
-    // Store original sentence count
+    // Store original sentence count and lock time
     session->original_sentence_count = original_sentence_count;
+    session->lock_time = time(NULL);
     
     // Copy current file content to temp file
     FILE *src = fopen(filepath, "r");
@@ -240,12 +443,11 @@ int start_write_session_ss(const char *filename, const char *username, int sent_
     fclose(src);
     fclose(temp);
     
-    log_formatted(LOG_INFO, "Started write session: %s by %s on sentence %d (file had %d sentences)", 
-                 filename, username, sent_idx, original_sentence_count);
+    log_formatted(LOG_INFO, "Started write session: %s by %s on sentence %d (file had %d sentences, locked at %ld)", 
+                  filename, username, sent_idx, original_sentence_count, session->lock_time);
     return SUCCESS;
 }
 
-// KEY FIX: Simplified commit logic that leverages the fact that only ONE sentence is modified
 int commit_write_session_ss(const char *filename, const char *username, int sent_idx) {
     WriteSession *session = get_write_session(filename, username, sent_idx, 0);
     if (!session) {
@@ -253,149 +455,42 @@ int commit_write_session_ss(const char *filename, const char *username, int sent
         return SUCCESS;
     }
     
-    char filepath[MAX_PATH];
-    snprintf(filepath, sizeof(filepath), "%s/%s", ss.storage_path, filename);
+    // Enqueue this commit
+    int result = enqueue_commit(filename, username, sent_idx, 
+                                 session->original_sentence_count,
+                                 session->temp_filepath, 
+                                 session->lock_time);
     
-    // Create undo backup before merging
-    if (create_undo_backup(filepath) != 0) {
-        log_formatted(LOG_WARNING, "Could not create undo backup before merge");
-    }
-    
-    // Parse CURRENT main file (may have been modified by other commits)
-    FileContent *main_fc = init_file_content();
-    int main_parsed = (parse_file(filepath, main_fc) == 0);
-    
-    // Parse temp file (contains this user's modifications to sentence sent_idx)
-    FileContent *temp_fc = init_file_content();
-    int temp_parsed = (parse_file(session->temp_filepath, temp_fc) == 0);
-    
-    if (!temp_parsed) {
-        log_formatted(LOG_ERROR, "Failed to parse temp file for commit");
-        free_file_content(main_fc);
-        free_file_content(temp_fc);
+    if (result != 0) {
+        log_formatted(LOG_ERROR, "Failed to enqueue commit");
         remove_write_session(filename, username, sent_idx);
         return ERR_SERVER_ERROR;
     }
     
-    if (!main_parsed) {
-        // Main file is empty/new, just use temp file as-is
-        log_formatted(LOG_INFO, "Main file empty, using temp file as-is");
-        if (write_file_content(filepath, temp_fc) != 0) {
-            free_file_content(main_fc);
-            free_file_content(temp_fc);
-            return ERR_SERVER_ERROR;
-        }
-    } else {
-        // KEY INSIGHT: We locked sentence sent_idx when the file had 
-        // original_sentence_count sentences. Now we need to:
-        // 1. Calculate how many sentences the locked sentence became (in temp)
-        // 2. Replace ONLY that sentence in the current main file
-        
-        int original_count = session->original_sentence_count;
-        int temp_count = temp_fc->sentence_count;
-        
-        // How many sentences did the locked sentence expand to?
-        // If temp has more sentences than original, the difference is the expansion
-        int sentence_expansion = temp_count - original_count;
-        int modified_sentence_count = 1 + sentence_expansion;  // At least 1 sentence
-        
-        log_formatted(LOG_INFO, "Merging: main has %d sentences, temp has %d (was %d), "
-                     "sentence %d expanded to %d sentence(s)",
-                     main_fc->sentence_count, temp_count, original_count, 
-                     sent_idx, modified_sentence_count);
-        
-        // Validate that sent_idx still exists in current main
-        if (sent_idx >= main_fc->sentence_count) {
-            log_formatted(LOG_ERROR, "Sentence %d no longer exists in main file (has %d sentences)",
-                         sent_idx, main_fc->sentence_count);
-            free_file_content(main_fc);
-            free_file_content(temp_fc);
-            remove_write_session(filename, username, sent_idx);
-            return ERR_SERVER_ERROR;
-        }
-        
-        // Build new sentence array
-        // New total = (sentences before sent_idx) + (modified sentences) + (sentences after sent_idx)
-        int new_total = main_fc->sentence_count + sentence_expansion;
-        Sentence *new_sentences = malloc(sizeof(Sentence) * (new_total > 0 ? new_total : 1));
-        if (!new_sentences) {
-            free_file_content(main_fc);
-            free_file_content(temp_fc);
-            return ERR_SERVER_ERROR;
-        }
-        
-        int new_idx = 0;
-        
-        // Step 1: Copy all sentences BEFORE sent_idx from current main
-        // (these may have been modified by other concurrent writes)
-        for (int i = 0; i < sent_idx; i++) {
-            new_sentences[new_idx++] = main_fc->sentences[i];
-        }
-        
-        // Step 2: Insert the modified sentence(s) from temp (deep copy)
-        // Extract sentences [sent_idx, sent_idx + modified_sentence_count) from temp
-        for (int i = 0; i < modified_sentence_count && (sent_idx + i) < temp_fc->sentence_count; i++) {
-            Sentence *src = &temp_fc->sentences[sent_idx + i];
+    // Remove write session (temp file will be cleaned up after queue processing)
+    pthread_mutex_lock(&write_sessions_mutex);
+    for (int i = 0; i < write_session_count; i++) {
+        if (write_sessions[i].active &&
+            strcmp(write_sessions[i].filename, filename) == 0 &&
+            strcmp(write_sessions[i].username, username) == 0 &&
+            write_sessions[i].sentence_idx == sent_idx) {
             
-            new_sentences[new_idx].capacity = src->word_count > 10 ? src->word_count : 10;
-            new_sentences[new_idx].word_count = src->word_count;
-            new_sentences[new_idx].words = malloc(sizeof(char*) * new_sentences[new_idx].capacity);
-            
-            // Deep copy all words
-            for (int j = 0; j < src->word_count; j++) {
-                new_sentences[new_idx].words[j] = strdup(src->words[j]);
+            // Don't delete temp file here - queue will handle it
+            // Just mark inactive
+            for (int j = i; j < write_session_count - 1; j++) {
+                write_sessions[j] = write_sessions[j + 1];
             }
-            new_idx++;
-        }
-        
-        // Step 3: Copy all sentences AFTER sent_idx from current main
-        // (these may have been modified by other concurrent writes)
-        for (int i = sent_idx + 1; i < main_fc->sentence_count; i++) {
-            new_sentences[new_idx++] = main_fc->sentences[i];
-        }
-        
-        log_formatted(LOG_INFO, "Built merged content with %d sentences (expected %d)",
-                     new_idx, new_total);
-        
-        // Sanity check
-        if (new_idx != new_total) {
-            log_formatted(LOG_WARNING, "Sentence count mismatch: got %d, expected %d",
-                         new_idx, new_total);
-        }
-        
-        // Replace main's sentences array
-        // NOTE: We're transferring ownership of sentences before and after sent_idx,
-        // so we only free the array itself, not the sentences
-        free(main_fc->sentences);
-        main_fc->sentences = new_sentences;
-        main_fc->sentence_count = new_idx;
-        main_fc->capacity = new_total;
-        
-        // Write merged content back to disk
-        if (write_file_content(filepath, main_fc) != 0) {
-            log_formatted(LOG_ERROR, "Failed to write merged content");
-            free_file_content(main_fc);
-            free_file_content(temp_fc);
-            return ERR_SERVER_ERROR;
+            write_session_count--;
+            break;
         }
     }
+    pthread_mutex_unlock(&write_sessions_mutex);
     
-    // Update timestamps
-    struct stat st;
-    if (stat(filepath, &st) == 0) {
-        struct utimbuf times;
-        times.actime = time(NULL);
-        times.modtime = time(NULL);
-        utime(filepath, &times);
-    }
+    // Process the entire commit queue for this file
+    process_commit_queue(filename);
     
-    free_file_content(main_fc);
-    free_file_content(temp_fc);
-    
-    // Clean up write session
-    remove_write_session(filename, username, sent_idx);
-    log_formatted(LOG_INFO, "Successfully committed write session for %s by %s on sentence %d", 
-                 filename, username, sent_idx);
+    log_formatted(LOG_INFO, "Commit queued and processed for %s by %s on sentence %d", 
+                  filename, username, sent_idx);
     return SUCCESS;
 }
 
