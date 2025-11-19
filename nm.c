@@ -647,8 +647,8 @@ void handle_viewfolder(int client_sock, Message *msg) {
     
     strncpy(response.data, buffer, MAX_BUFFER - 1);
     response.status = SUCCESS;
-    printf("Setting status to success...\n");
-    printf("Created response: %s\n", response.data);
+    //printf("Setting status to success...\n");
+    //printf("Created response: %s\n", response.data);
     send_message(client_sock, &response);
 }
 
@@ -702,8 +702,8 @@ void handle_view(int client_sock, Message *msg) {
     int show_all = 0;
     int show_details = 0;
 
-    printf("[DEBUG] Received message: %d\n", msg->type);
-    printf("[DEBUG] Message data: %s\n", msg->data);
+    //printf("[DEBUG] Received message: %d\n", msg->type);
+    //printf("[DEBUG] Message data: %s\n", msg->data);
 
     /* Parse flags from msg->data: accept combined/repeated flags like -al, -laaa, -a -l, -all */
 
@@ -760,7 +760,7 @@ void handle_view(int client_sock, Message *msg) {
                 Message ss_resp;
                 if (recv_message(nm.ss_list[ss_idx].sock, &ss_resp) == 0 && 
                     ss_resp.status == SUCCESS) {
-                    printf("Reached here! with %s\n", ss_resp.data);
+                    //printf("Reached here! with %s\n", ss_resp.data);
                     // Changed delimiting to ; to avoid conflict - N
                     // Parse and update metadata
                     sscanf(ss_resp.data, "%zu|%d|%d|%ld|%ld",
@@ -1255,7 +1255,7 @@ void handle_exec(int client_sock, Message *msg) {
     recv_message(nm.ss_list[ss_idx].sock, &ss_response);
     pthread_mutex_unlock(&nm.ss_sock_mutexes[ss_idx]);
 
-    printf("SS Response Dtaa: %s\n", ss_response.data); // Debug line
+    //printf("SS Response Dtaa: %s\n", ss_response.data); // Debug line
     
     if (ss_response.status != SUCCESS) {
         response.status = ss_response.status;
@@ -1661,7 +1661,7 @@ void* handle_client_connection(void* arg) {
                     if (nm.ss_list[i].id == ss_id) {
                         sprintf(response.data, "%s:%d", 
                                nm.ss_list[i].ip, nm.ss_list[i].client_port);
-                        printf("SS Info sent to client: %s\n", response.data); // Debug line
+                        //printf("SS Info sent to client: %s\n", response.data); // Debug line
                         response.status = SUCCESS;
                         break;
                     }

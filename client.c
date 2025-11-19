@@ -157,7 +157,7 @@ void connect_to_nm() {
         inet_ntop(AF_INET, &local_addr.sin_addr, msg.data, INET_ADDRSTRLEN);
     } else {
         // Fallback: use loopback if we can't get the actual IP, continuously stuck here - N
-        printf("[DEBUG] getsockname failed, using loopback address\n");
+        //printf("[DEBUG] getsockname failed, using loopback address\n");
         strcpy(msg.data, "127.0.0.1");
     }
     
@@ -223,7 +223,7 @@ int connect_to_ss(const char *ss_info) {
     char ip[INET_ADDRSTRLEN];
     int port;
     
-    printf("[DEBUG] Connecting to SS with info: %s\n", ss_info); // Debug line
+    //printf("[DEBUG] Connecting to SS with info: %s\n", ss_info); // Debug line
     sscanf(ss_info, "%[^:]:%d", ip, &port);
     
     int ss_sock = socket(AF_INET, SOCK_STREAM, 0);
@@ -319,7 +319,7 @@ void handle_view(char *args) {
         strncpy(msg.data, args, MAX_BUFFER - 1);
     }
     
-    printf("[DEBUG] Sending VIEW request with args: %s\n", args ? args : "None");
+    //printf("[DEBUG] Sending VIEW request with args: %s\n", args ? args : "None");
     send_message(client.nm_sock, &msg);
     
     Message response;
@@ -460,23 +460,23 @@ void handle_create(char *filename) {
     strcpy(msg.sender, client.username);
     strcpy(msg.filename, filename);
     
-    printf("[DEBUG] Sending CREATE request for: %s\n", filename);
+    //printf("[DEBUG] Sending CREATE request for: %s\n", filename);
     
     if (send_message(client.nm_sock, &msg) < 0) {
-        printf("[DEBUG] Failed to send message\n");
+        //printf("[DEBUG] Failed to send message\n");
         return;
     }
-    
-    printf("[DEBUG] Waiting for response...\n");
-    
+
+    //printf("[DEBUG] Waiting for response...\n");
+
     Message response;
     if (recv_message(client.nm_sock, &response) < 0) {
-        printf("[DEBUG] Failed to receive response\n");
+        //printf("[DEBUG] Failed to receive response\n");
         return;
     }
-    
-    printf("[DEBUG] Received response: type=%d, status=%d\n", response.type, response.status);
-    
+
+    //printf("[DEBUG] Received response: type=%d, status=%d\n", response.type, response.status);
+
     if (response.status == SUCCESS) {
         printf("File created successfully!\n");
     } else {

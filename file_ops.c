@@ -175,7 +175,7 @@ char** split_by_delimiters(const char *word, int *count) {
     }
 
     for (int i = 0; i < *count; i++) {
-        printf("DEBUG split_by_delimiters part[%d] = '%s' (len=%zu, is_space=%d)\n", 
+        //printf("DEBUG split_by_delimiters part[%d] = '%s' (len=%zu, is_space=%d)\n", 
             i, parts[i], strlen(parts[i]), is_space_token(parts[i]));
     }
     
@@ -386,7 +386,7 @@ int write_file_content(const char *filepath, FileContent *fc) {
                 fprintf(file, " ");
             }
 
-            printf("DEBUG write token[%d][%d] = '%s' (is_space=%d)\n", i, j, fc->sentences[i].words[j], is_space_token(fc->sentences[i].words[j]));
+            //printf("DEBUG write token[%d][%d] = '%s' (is_space=%d)\n", i, j, fc->sentences[i].words[j], is_space_token(fc->sentences[i].words[j]));
         }
         
         // Handle space between sentences - FIXED SECTION
@@ -758,7 +758,7 @@ int create_undo_backup(const char *filepath) {
 }
 
 int restore_from_undo(const char *filepath) {
-    printf("[SS DEBUG] Restoring from undo: %s\n", filepath); // Debug line - N
+    //printf("[SS DEBUG] Restoring from undo: %s\n", filepath); // Debug line - N
     char undo_path[MAX_PATH];
     snprintf(undo_path, sizeof(undo_path), "%s.undo", filepath);
     
@@ -767,7 +767,7 @@ int restore_from_undo(const char *filepath) {
         return -1;
     }
 
-    printf("[SS DEBUG] Undo file exists: %s\n", undo_path); // Debug line - N
+    //printf("[SS DEBUG] Undo file exists: %s\n", undo_path); // Debug line - N
     
     // Copy undo to original
     FILE *src = fopen(undo_path, "r");
@@ -782,13 +782,13 @@ int restore_from_undo(const char *filepath) {
     char buffer[MAX_BUFFER];
     size_t bytes;
 
-    printf("[SS DEBUG] Starting file restoration...\n"); // Debug line - N
+    //printf("[SS DEBUG] Starting file restoration...\n"); // Debug line - N
     
     while ((bytes = fread(buffer, 1, sizeof(buffer), src)) > 0) {
         fwrite(buffer, 1, bytes, dst);
     }
 
-    printf("[SS DEBUG] File restoration completed.\n"); // Debug line - N
+    //printf("[SS DEBUG] File restoration completed.\n"); // Debug line - N
      
     fclose(src);
     fclose(dst);
@@ -796,7 +796,7 @@ int restore_from_undo(const char *filepath) {
     // Remove undo file after restoration
     unlink(undo_path);
 
-    printf("[SS DEBUG] Undo file removed: %s\n", undo_path); // Debug line - N
+    //printf("[SS DEBUG] Undo file removed: %s\n", undo_path); // Debug line - N
     return 200; // Return 200 to indicate success as per previous convention - N
 }
 

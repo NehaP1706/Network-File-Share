@@ -1,0 +1,862 @@
+{
+  "requesterUsername": "shraw06",
+  "requesterAvatarIconUri": {
+    "$mid": 1,
+    "path": "/u/194143757",
+    "scheme": "https",
+    "authority": "avatars.githubusercontent.com",
+    "query": "v=4"
+  },
+  "responderUsername": "GitHub Copilot",
+  "responderAvatarIconUri": {
+    "id": "copilot"
+  },
+  "initialLocation": "panel",
+  "requests": [
+    {
+      "requestId": "request_c6630471-077a-4be0-88ef-929eed198e1e",
+      "message": {
+        "text": "We have an issue:\nWhen the client encounters a ctrl c signal after calling the write command but before entering ETIRW, it ends (which is the expected behaviour), but it keep the particular sentence locked, and doesn't unlock it. I want to implement a sigint handler which just unlocks the senetence of that file, and not close the storage server.",
+        "parts": [
+          {
+            "range": {
+              "start": 0,
+              "endExclusive": 347
+            },
+            "editorRange": {
+              "startLineNumber": 1,
+              "startColumn": 1,
+              "endLineNumber": 2,
+              "endColumn": 330
+            },
+            "text": "We have an issue:\nWhen the client encounters a ctrl c signal after calling the write command but before entering ETIRW, it ends (which is the expected behaviour), but it keep the particular sentence locked, and doesn't unlock it. I want to implement a sigint handler which just unlocks the senetence of that file, and not close the storage server.",
+            "kind": "text"
+          }
+        ]
+      },
+      "variableData": {
+        "variables": [
+          {
+            "kind": "file",
+            "id": "vscode.implicit.file",
+            "name": "file:client.c",
+            "value": {
+              "$mid": 1,
+              "fsPath": "/home/shrawani/course-project-shellshocked/client.c",
+              "external": "file:///home/shrawani/course-project-shellshocked/client.c",
+              "path": "/home/shrawani/course-project-shellshocked/client.c",
+              "scheme": "file"
+            },
+            "modelDescription": "User's active file"
+          }
+        ]
+      },
+      "response": [
+        {
+          "kind": "thinking",
+          "value": "**Identifying pipe issues**\n\nI see there's a declaration for a pipe variable `int sig_pipe[2] = {-1, -1};`, but since it's commented out, calling `pipe(sig_pipe)` in the main function would cause a compile error. The if-statement checking the result wouldn’t work because `sig_pipe` isn’t defined correctly. To fix this, I need to declare `sig_pipe` globally as `int sig_pipe[2];` and ensure that the signal handler writes safely to the pipe. The program will also require modifications to monitor the pipe with select.",
+          "id": "8HW+gBVcjtPsCTngp5mX4GAYdj6ACU5VbTkvkDnxI8k4Ms8NrLok0D4qHTy10q1qDsnA6ChKxqyzAMCcHj4F9gwMMG3HwfSiyz/yutEGssQPEfx5EjDyc1xFrZ+1Fo9iRfhthvk8x78IqhRy2tI8c2Bk/nx0u63hfMNjIUUcd79CHXLvxLe+a275o9mAdD/6qrqNXdI8QvYHtrbUVGF8GFUwTNqMXKs+1WUAuVVVTwjAaqt7UZKIKPPJ9TMnxkzJk6x2aRk8j+kjeVeGk6x8n488WM978yoOh4Q9N7tVxDyq+JcxFHIwp7UOj1+PnoE0nxz+yFiz3nDLKczRKFACNpi9uEreurXHB45yHrHiB1+w373Xl75xm0KRDrBoAlvKG5TNyOHz6ZUGU+xODkyZKCNaf8/c23s="
+        },
+        {
+          "kind": "thinking",
+          "value": "",
+          "id": "qfcpbkRN/swp/rj/b/V9VZ24ArM8DfgerMJOKoKeVBgSY/lMplg4G8uPSI9CMNI2/iYa936vFmfBwYwJ49O2uwVrH48IqIqyUMoxgMBAogLDn9ETOX9AN6rS9bL9ROjm6SOtIBZWUj+JZaiVSSHS9k6Y7ohxfmVWK6EGtxGk252yDzjUnuVzgF9XpbzTxkQmYas/f9hkVQbjxJKC9rzDZXUmp4cFdKzapKS2rSYaSEfKAhp5AJCH+80IfEmyC7lan8qZc46Ehd/fUdrdaSTQ+Cvd1irLYAdFWHL1mX8Mxm+xWBMWZKOyOz8frvulcxHNxiEzQIuaa+qsXvNQGJWLrQq10xL9S2I51tpmTqNPD1tMCez6brRGcQ0C7WLa523tf0KFEAwC/htyTQ5eb3zhb9k2196f/oI="
+        },
+        {
+          "kind": "thinking",
+          "value": "**Planning struct and handler**\n\nI’m thinking of creating a global struct to manage the necessary information, like `ss_sock`, sentence index, and filename. However, writing the file descriptor as an integer might not be safe across threads, especially since the main thread uses `ss_sock`. The user wants to unlock a specific sentence without closing the storage server, so the main thread should send a message for unlocking the sentence. The handler's role will be to notify the main loop with the relevant data while preserving `current_ss_sock`, which is declared as `volatile sig_atomic_t`. Implementing these changes will keep everything organized.",
+          "id": "m49TogQDBmMc7TbUb3NMdcCvpfZBhJf0+HGLV37AYRbrQRbtuaFmj4uLOghoE0yc1Z6I9OZxef2Q8AxRwR32N308bpJREvxOpR4pm3Gqp6sX+MLx9AJohNM4pF3csSiLSKogB1KmZWdIZOth/IdI+RhmaJeBhiH3dxBG8KrUkLSYPSq5jBSrcAlDRTlon3WDAywf7jLj45XU7bFolbMsaeKctzwrPKaGzTljEjBDOGqpRUZCh5TA1TIt+VI/e9PdqOD8Ah/hIEI3QneCLm9uuLDXQBTj97EN8If3ZZ3DO49Sw8RiQTYRm3Xd4Z7XWOQToqCO6enO4rKxcNF+DgAo3yhagvt3vtG4kE8xabZbEUNU2xoWANkTIfVYG8Ub5o2i37xi7MWEF0N0jW2FhKCso7qRo4utXRY="
+        },
+        {
+          "kind": "thinking",
+          "value": "",
+          "id": "oPxR2yJuLB07Vp4Y5AwaJC9LNmvgXsZBkusADtQTwnrZvrYgn86RdL4PpykaBHOhTtKoj68DgwQARBwv8HAqpd/i3QphR6G9Kt87RwECaKdOGR4Su0X07cIOAv2i55jaQS/MEjdidu4P96+oUf77zQt2o5s036daEtVA1rPrM+Y0eK0NLHP+9miyTyWmAEOkso/yHx5elFVY93A0OWIQHIIOz1J4bNCg3TRRYPlCs79AWQsBvwZEfTF1Y1XMOAHnlprn46Arv6wSpTZquhVAj4T1DIyJTRaLPw0aHdYfBiT4QEshrdgXb7sXygzCgoNUoOW0JCHa9N8LajT+SQsP66LsZFtBrgERzeJbATydaXFF9mKeXGTOxh2vJI7DEJ7CXwkaJ1qwHBl/oMeT7CPjvhSj45AbDRc="
+        },
+        {
+          "kind": "thinking",
+          "value": "**Adjusting signal handler**\n\nI need to remove the close operations from the signal handler. It seems the previous handler was closing `nm_sock` and the logger before using `_exit`, but the user simply wants to unlock the sentence without closing the storage server. So when `SIGINT` is received, I should just send the unlock message to the storage server but keep it running and not close the socket itself. It looks like it can exit while leaving the connection open. I need to ensure the server remains operational while handling this properly.",
+          "id": "80vNFt+NHj20Mu/1YiM8PYQHsajEjM1WFPw3uyxHlT9aJGtSjkItPKgTTt/BfOwhRsF88OucY6XaTjKMWsWVAv6W6CgeeD230GDiaeLyvIYOQ+jtU0B4pTJdfPUFzk3R+dJwqqBTIm7Vh9EyBUgALjqzGvYXojJQb4ygLmImN4A1eRzReaUEyckgWytt3KDL41PpF1rtjXjaAHyPgIeEq6Ofot9Jtcrx9q4kzp+ThVb3Cn0xxNlIb31/VsdI4Vzb8kpjZ4YMB4zs7KUlkLjxdSJgUJ6nc6I+N7y58s7WLL3h5d9lDF+ySbsenbTXp6b/I2zfHb/U7EzFPNU3Zt0gUXjwfvv8Gv++OO6kW0QQxzgT4jIs0w4e0pE7xCYJCdxBljWpOpPXQCw95Nxl2qUJghClOW58+L0="
+        },
+        {
+          "kind": "thinking",
+          "value": "",
+          "id": "pWVUw2C+l/bjD5FatexYLMS0lvXnUhajJuYX+zrQ7Oo7bnBZ8lTXwsTGLfxeT7QyATqcJMONBqGlUqQroRPieC616eVuje6l6no2goDbTv6LrES9QohZWi9T5Af3UotsDemc1zmm9AQ8dXN871UeRfCaoeq0pmugw7NXkhclSAM4OxG3lCzaoZ04LstsW03UiZ/uiiJ1Meo6zV4jodTzYgNCWq/Y8rGeenfTRmCd5tOrJiHJL/5qPReQfw0e8sIciYTrkN3+ePtI8he+KqVQzy2kfSnV3GQswSnXyGnEDeukGWG+c1KVDOIFjvCaWUbC8ZyJOlv8w57Nyg2vVsK28uvFxRfqob+NKtKTXYoFDKBe2CqKonwNsEuwJoey1BksHgInf37TxyDHS1Mgy9fM8foMJOCGcA4="
+        },
+        {
+          "kind": "thinking",
+          "value": "**Implementing safe notification through pipe**\n\nI realized the call to `send_message` in the handler isn’t safe. So, I’ll implement a notification mechanism using a pipe. The handler will write a byte to `sig_pipe[1]` and set a flag, `sigint_received`, to 1. The main loop needs a non-blocking select or poll to check both the pipe and stdin. I’ll modify the command loop to read from stdin when it’s available. Additionally, after unlocking, I should ensure the program exits cleanly without closing the storage server but may need to close `client.nm_sock` in the main function.",
+          "id": "SsXEaSteqbicVBpGfj4oD1j7iJlo2SQZeWdvPFSDeS1cctZozRjc62EZxB7kpBCu2HaQtESOHn6b+urKuVK2cwpg0gg2PJvzCuobwHpD9c9YvsVXveCisgIU1zUB2mDFuqSYuJblqN27f3xPLoeeFkCfimvoqIzXB8Va4zkpZXZw4t5V+G4a9nfi+qP7Qe62Awm+UEuOD7eCnf753mCyG3KQD1/QUlw1l68E/1vkXAKLAFBDpWSVclVvhppBmV4eJptef9IG3cNdXYSSDjgNrYXuCXmFCmEtxfzoYR3nzYf+ECagxiCCafqeDRrwuAKckPhpqQT2kXn2lpzOuiYGimc6A9pre704aRhjX+v3I4U2VZH6Fz6Yorr3nU9NB7T0gEOXmZpzGGVul/Z1GDRc0FrT9S3yPP0="
+        },
+        {
+          "kind": "thinking",
+          "value": "",
+          "id": "6uoVWw7chVd1DVeJ7S2fI+O9cgAJCGehHZ5paaWJ5xFxS61gNSpxdoIhU29EQz107/CZdnSv7HYh8oq4DoPIsNFjnr8xqnb1pB3o/PI2KSgFKmllLRDQ40o7FHX4cbjeFdIAp3og2b8x6pMMnCVTNwsa6yT1zMc3WDe25N0G7zM495uRfa4TUt55Tbd5hY2HSNPXWm9D9zmVfIRAb7+7cZJKvHkuzdgUhvSyRuX5zG/fLJ5lQb4dCwYnWo7r04xkHvRy4y7hypymRpSHSXcs7yys4mki8HkRNDVRx4ogc+kHFZsTy91ILBUoo9IEd4wKhzGFviyJPtR3UepLcL3neOru84jLJ9ZQclJKVweNMFRvEwTqp5Yw0jJ9bDCC9SHas5UuCp9fLjeOoTbfcUW+4YAqLh+mGtQ="
+        },
+        {
+          "kind": "thinking",
+          "value": "```\n/home/shrawani/course-project-shellshocked/client.c\n\n#include <fcntl.h>        // for fcntl\n#include <errno.h>        // for errno\n#include <sys/select.h>   // for select\n\nint sig_pipe[2] = {-1, -1};    // global declaration\nvolatile sig_atomic_t sigint_received = 0;\n\nvoid sigint_handler(int signo) {\n    if (sig_pipe[1] != -1) {\n        const char b = 'I';\n        write(sig_pipe[1], &b, 1);\n    }\n}\n\nvoid perform_pending_unlock() {\n    if (current_ss_sock > 0 && current_locked_sentence >= 0) {\n        Message msg;\n        init_message(&msg);\n        msg.type = MSG_UNLOCK_SENTENCE;\n        strncpy(msg.filename, current_locked_filename, MAX_FILENAME-1);\n        msg.filename[MAX_FILENAME-1]='\\0';\n        strcpy(msg.sender, client.username);\n        msg.sentence_index = current_locked_sentence;\n\n        if (send_message((int)current_ss_sock, &msg) < 0) {\n            printf(\"[WARN] Failed to send unlock to SS (connection?)\\n\");\n        } else {\n            Message resp;\n            if (recv_message((int)current_ss_sock, &resp) >= 0) {\n                if (resp.status == SUCCESS) {\n                    printf(\"\\n[INFO] Sentence %d in %s unlocked due to interrupt\\n\", current_locked_sentence, current_locked_filename);\n                } else {\n                    printf(\"\\n[WARN] Unlock returned status %d\\n\", resp.status);\n                }\n            }\n        }\n        current_locked_sentence = -1;\n        current_locked_filename[0] = '\\0';\n    }\n}\n\nwhile (1) {\n    FD_ZERO(&readfds); \n    FD_SET(STDIN_FILENO, &readfds); \n    FD_SET(sig_pipe[0], &readfds);\n    int maxfd = max(STDIN_FILENO, sig_pipe[0]);\n    int rv = select(maxfd + 1, &readfds, NULL, NULL, NULL);\n    \n    if (rv < 0) { \n        if (errno == EINTR) continue; \n        perror(\"select error\"); break; \n    }\n\n    if (FD_ISSET(sig_pipe[0], &readfds)) {\n        char buf[64];\n        while (read(sig_pipe[0], buf, sizeof(buf)) > 0) {}\n        perform_pending_unlock();\n        printf(\"Received interrupt, exiting...\\n\");\n        break;\n    }\n\n    if (FD_ISSET(STDIN_FILENO, &readfds)) {\n        if (!fgets(line, sizeof(line), stdin)) break;\n        ...existing parsing logic...\n    }\n}\n\n```",
+          "id": "+7fOebXf3Ia3I5mXeSP9UEVgkyJ26OKuGG3JyPahEz6LW33YwmlXG/S33sJ8VA589gC2+hqUIIcn1E5zs4AzFQ1q8cjFzgo1lEJDQLVHdWYpvtehOopUR5FJ8a1/uvTQnq+fJR+FNd7b9pLgoSfSr0X4Uv/ujecgfxMa2aQMDdOqlFLRltP5z+9Vtu6Xj0cVrWQ0T/S27i2gxopbHhuPd3MijcYMb3UcqUBeVkIVHx+NgHIXE9QFin2RQfYSe5yQDg1Zky4/vOUSYFGc7saHNA/kHvI2tDnNdVOvvTje0gGtyc6BL6Btww0gn58P75+dy5UMCzvo7IauS1UDkk034/o5hZqsQF4S0/WzptUj3ms5k0DniYcRmaLFsGv3B2t4XfVJW0RdkDLbfgKwyLkoX98TPyFplnQ="
+        },
+        {
+          "kind": "thinking",
+          "value": "",
+          "id": "RecafQTjOfGjldEvhTXnPlcGYuv/qvglolPr6KIHoo5UslTnM+nF6rWf5FfdkgKkqwszV0/cKbJNgLFFaIYcVRU/pQqU4X0s0uaCZRItKEoOCh+98B+WFwdSi9NuvSMqa7tNzN9c6UWstagbiGJ5CZTTfctA7ea7AaBeC0z3cZAb15fRi/rf6fAQS8MLmPh/9Dn6lRTyX6dEYjX1dTLgqZ68j/ClGzU6FsfiMeL2SqfJVwpSqq/szqZBtMhibvIbYpT/TTlZERBsd0xPOTwX3VrfgQJ0irJxKbpbvfCFp83CQYO8dND82CcykUDtF7wIOR6XEBQ75EGts+BNBtnPT1JjDrVb65Nk84z50gejmPpyCrEoNkAvL6SNl+rZAxxMHhdUkrGOtppvuK1wQfTN9Vshf2z2jNc="
+        },
+        {
+          "value": "GitHub Copilot\n\nI updated the client to use a self-pipe to safely notify the main loop of SIGINT and perform the unlock from the main context (where send_message / recv_message are safe). The signal handler now only writes a byte to the pipe. The main loop uses select() to listen on stdin and the pipe; when data arrives on the pipe the main thread sends MSG_UNLOCK_SENTENCE to the storage server (if a sentence is locked), then exits. The storage server process is not shut down by this client change.\n\nChanges (key parts) — apply to client.c:\n\n````c\n",
+          "supportThemeIcons": false,
+          "supportHtml": false,
+          "baseUri": {
+            "$mid": 1,
+            "path": "/home/shrawani/course-project-shellshocked/",
+            "scheme": "file"
+          }
+        },
+        {
+          "kind": "codeblockUri",
+          "uri": {
+            "$mid": 1,
+            "fsPath": "/home/shrawani/course-project-shellshocked/client.c",
+            "external": "file:///home/shrawani/course-project-shellshocked/client.c",
+            "path": "/home/shrawani/course-project-shellshocked/client.c",
+            "scheme": "file"
+          }
+        },
+        {
+          "value": "// ...existing code...\n#include <signal.h> // For signal handling - S\n#include <unistd.h> // For signal handling - S\n#include <fcntl.h>\n#include <errno.h>\n#include <sys/select.h>\n// ...existing code...\n\n// Signal handling variables - S\nvolatile sig_atomic_t current_ss_sock = -1;\nvolatile sig_atomic_t current_locked_sentence = -1;\nchar current_locked_filename[MAX_FILENAME] = {0};\nint sig_pipe[2] = {-1, -1};\nvolatile sig_atomic_t sigint_received = 0;\n// ...existing code...\n\nvoid sigint_handler(int signo) {\n    // Notify main loop via pipe (async-signal-safe)\n    if (sig_pipe[1] != -1) {\n        const char b = 'I';\n        ssize_t r = write(sig_pipe[1], &b, 1);\n        (void)r;\n    }\n    // do not call send/recv/close here; let main thread handle unlocking\n    sigint_received = 1;\n}\n\n// New helper: perform unlock from main thread (safe to call send_message/recv_message)\nvoid perform_pending_unlock() {\n    if (current_ss_sock > 0 && current_locked_sentence >= 0) {\n        Message msg;\n        init_message(&msg);\n        msg.type = MSG_UNLOCK_SENTENCE;\n        strncpy(msg.filename, current_locked_filename, MAX_FILENAME - 1);\n        msg.filename[MAX_FILENAME - 1] = '\\0';\n        strcpy(msg.sender, client.username);\n        msg.sentence_index = current_locked_sentence;\n\n        if (send_message((int)current_ss_sock, &msg) < 0) {\n            printf(\"\\n[WARN] Failed to send unlock to storage server (connection error)\\n\");\n        } else {\n            Message resp;\n            if (recv_message((int)current_ss_sock, &resp) >= 0) {\n                if (resp.status == SUCCESS) {\n                    printf(\"\\n[INFO] Sentence %d in '%s' unlocked due to interrupt\\n\", current_locked_sentence, current_locked_filename);\n                } else {\n                    printf(\"\\n[WARN] Unlock returned status %d\\n\", resp.status);\n                }\n            } else {\n                printf(\"\\n[WARN] No response from storage server on unlock\\n\");\n            }\n        }\n\n        current_locked_sentence = -1;\n        current_locked_filename[0] = '\\0';\n        // Do not close current_ss_sock here (user requested not to close SS)\n    }\n}\n// ...existing code...\n\nvoid command_loop() {\n    char line[MAX_BUFFER];\n\n    printf(\"\\nWelcome %s! Type commands (or 'help' for list, 'exit' to quit):\\n\", client.username);\n\n    while (1) {\n        printf(\"\\n> \");\n        fflush(stdout);\n\n        fd_set rfds;\n        FD_ZERO(&rfds);\n        FD_SET(STDIN_FILENO, &rfds);\n        if (sig_pipe[0] != -1) {\n            FD_SET(sig_pipe[0], &rfds);\n        }\n        int maxfd = (sig_pipe[0] > STDIN_FILENO) ? sig_pipe[0] : STDIN_FILENO;\n\n        int sel = select(maxfd + 1, &rfds, NULL, NULL, NULL);\n        if (sel < 0) {\n            if (errno == EINTR) continue;\n            perror(\"select\");\n            break;\n        }\n\n        // If signal pipe has data, perform unlock and then exit loop\n        if (sig_pipe[0] != -1 && FD_ISSET(sig_pipe[0], &rfds)) {\n            char buf[64];\n            // drain pipe\n            while (read(sig_pipe[0], buf, sizeof(buf)) > 0) { }\n            perform_pending_unlock();\n            printf(\"\\nReceived interrupt, exiting client.\\n\");\n            break;\n        }\n\n        if (FD_ISSET(STDIN_FILENO, &rfds)) {\n            if (!fgets(line, sizeof(line), stdin)) {\n                break;\n            }\n\n            // existing parsing logic\n            trim_whitespace(line);\n\n            if (strlen(line) == 0) {\n                continue;\n            }\n\n            char* buf = line;\n            char** argv = NULL;\n            int argc_local = 0;\n            int cap = 0;\n            char* saveptr = NULL;\n            char* tok = strtok_r(buf, \" \\t\", &saveptr);\n            while(tok)\n            {\n                if(argc_local + 1 >= cap)\n                {\n                    int newcap = cap? cap * 2 : 8;\n                    char** tmp = realloc(argv, newcap * sizeof(char*));\n                    if(!tmp) { free(argv); argv=NULL; cap=0; break; }\n                    argv = tmp;\n                    cap = newcap;\n                }\n                argv[argc_local++] = tok;\n                tok = strtok_r(NULL, \" \\t\", &saveptr);\n            }\n\n            if(!argv) { continue; }\n            argv[argc_local] = NULL;\n            if(argc_local < 1) { free(argv); continue; }\n\n            char tail[MAX_BUFFER] = \"\";\n            if(argc_local > 1)\n            {\n                size_t off = 0;\n                for(int i = 1; i < argc_local; i++)\n                {\n                    int n = snprintf(tail + off, sizeof(tail) - off, \"%s%s\", (i == 1) ? \" \" : \"\", argv[i]);\n                    if(n<0) break;\n                    off += (size_t)n;\n                    if(off >= sizeof(tail)-1) break;\n                }\n            }\n\n            char* cmd = argv[0];\n\n            // ...existing command dispatch code...\n            // (no changes to handlers themselves)\n            free(argv);\n        }\n    }\n}\n// ...existing code...\n\nint main(int argc, char *argv[]) {\n\n    if(pipe(sig_pipe)<0) {\n        perror(\"pipe\");\n        return 1;\n    }\n\n    int flags = fcntl(sig_pipe[0], F_GETFL, 0);\n    fcntl(sig_pipe[0], F_SETFL, flags | O_NONBLOCK);\n    // Set up signal handler - S\n    struct sigaction sa;\n    sa.sa_handler = sigint_handler;\n    sigemptyset(&sa.sa_mask);\n    sa.sa_flags = 0;\n    sigaction(SIGINT, &sa, NULL);\n    // ...existing code...\n    init_client();\n    connect_to_nm();\n    command_loop();\n\n    close(client.nm_sock);\n    close_logger();\n    if (sig_pipe[0] != -1) close(sig_pipe[0]);\n    if (sig_pipe[1] != -1) close(sig_pipe[1]);\n    return 0;\n}\n````\n\nNotes:\n- The signal handler is limited to async-signal-safe operations (write). All networking calls (send_message/recv_message) run inside perform_pending_unlock() executed by the main thread.\n- The code drains the self-pipe and then performs the unlock and exits the client loop. The storage server process remains running; we don't attempt to shut it down.\n- You may tweak whether to exit after handling the interrupt or return to the prompt — current behavior exits after unlocking (you can change that if you want to continue the client session).\n\nIf you want, I can produce a full unified patch (or the full updated file) instead of snippets.",
+          "supportThemeIcons": false,
+          "supportHtml": false,
+          "baseUri": {
+            "$mid": 1,
+            "path": "/home/shrawani/course-project-shellshocked/",
+            "scheme": "file"
+          }
+        }
+      ],
+      "responseId": "response_12aaeb8d-c1ce-402f-860d-7164c9da23e6",
+      "result": {
+        "timings": {
+          "firstProgress": 54652,
+          "totalElapsed": 113424
+        },
+        "metadata": {
+          "codeBlocks": [
+            {
+              "code": "// ...existing code...\n#include <signal.h> // For signal handling - S\n#include <unistd.h> // For signal handling - S\n#include <fcntl.h>\n#include <errno.h>\n#include <sys/select.h>\n// ...existing code...\n\n// Signal handling variables - S\nvolatile sig_atomic_t current_ss_sock = -1;\nvolatile sig_atomic_t current_locked_sentence = -1;\nchar current_locked_filename[MAX_FILENAME] = {0};\nint sig_pipe[2] = {-1, -1};\nvolatile sig_atomic_t sigint_received = 0;\n// ...existing code...\n\nvoid sigint_handler(int signo) {\n    // Notify main loop via pipe (async-signal-safe)\n    if (sig_pipe[1] != -1) {\n        const char b = 'I';\n        ssize_t r = write(sig_pipe[1], &b, 1);\n        (void)r;\n    }\n    // do not call send/recv/close here; let main thread handle unlocking\n    sigint_received = 1;\n}\n\n// New helper: perform unlock from main thread (safe to call send_message/recv_message)\nvoid perform_pending_unlock() {\n    if (current_ss_sock > 0 && current_locked_sentence >= 0) {\n        Message msg;\n        init_message(&msg);\n        msg.type = MSG_UNLOCK_SENTENCE;\n        strncpy(msg.filename, current_locked_filename, MAX_FILENAME - 1);\n        msg.filename[MAX_FILENAME - 1] = '\\0';\n        strcpy(msg.sender, client.username);\n        msg.sentence_index = current_locked_sentence;\n\n        if (send_message((int)current_ss_sock, &msg) < 0) {\n            printf(\"\\n[WARN] Failed to send unlock to storage server (connection error)\\n\");\n        } else {\n            Message resp;\n            if (recv_message((int)current_ss_sock, &resp) >= 0) {\n                if (resp.status == SUCCESS) {\n                    printf(\"\\n[INFO] Sentence %d in '%s' unlocked due to interrupt\\n\", current_locked_sentence, current_locked_filename);\n                } else {\n                    printf(\"\\n[WARN] Unlock returned status %d\\n\", resp.status);\n                }\n            } else {\n                printf(\"\\n[WARN] No response from storage server on unlock\\n\");\n            }\n        }\n\n        current_locked_sentence = -1;\n        current_locked_filename[0] = '\\0';\n        // Do not close current_ss_sock here (user requested not to close SS)\n    }\n}\n// ...existing code...\n\nvoid command_loop() {\n    char line[MAX_BUFFER];\n\n    printf(\"\\nWelcome %s! Type commands (or 'help' for list, 'exit' to quit):\\n\", client.username);\n\n    while (1) {\n        printf(\"\\n> \");\n        fflush(stdout);\n\n        fd_set rfds;\n        FD_ZERO(&rfds);\n        FD_SET(STDIN_FILENO, &rfds);\n        if (sig_pipe[0] != -1) {\n            FD_SET(sig_pipe[0], &rfds);\n        }\n        int maxfd = (sig_pipe[0] > STDIN_FILENO) ? sig_pipe[0] : STDIN_FILENO;\n\n        int sel = select(maxfd + 1, &rfds, NULL, NULL, NULL);\n        if (sel < 0) {\n            if (errno == EINTR) continue;\n            perror(\"select\");\n            break;\n        }\n\n        // If signal pipe has data, perform unlock and then exit loop\n        if (sig_pipe[0] != -1 && FD_ISSET(sig_pipe[0], &rfds)) {\n            char buf[64];\n            // drain pipe\n            while (read(sig_pipe[0], buf, sizeof(buf)) > 0) { }\n            perform_pending_unlock();\n            printf(\"\\nReceived interrupt, exiting client.\\n\");\n            break;\n        }\n\n        if (FD_ISSET(STDIN_FILENO, &rfds)) {\n            if (!fgets(line, sizeof(line), stdin)) {\n                break;\n            }\n\n            // existing parsing logic\n            trim_whitespace(line);\n\n            if (strlen(line) == 0) {\n                continue;\n            }\n\n            char* buf = line;\n            char** argv = NULL;\n            int argc_local = 0;\n            int cap = 0;\n            char* saveptr = NULL;\n            char* tok = strtok_r(buf, \" \\t\", &saveptr);\n            while(tok)\n            {\n                if(argc_local + 1 >= cap)\n                {\n                    int newcap = cap? cap * 2 : 8;\n                    char** tmp = realloc(argv, newcap * sizeof(char*));\n                    if(!tmp) { free(argv); argv=NULL; cap=0; break; }\n                    argv = tmp;\n                    cap = newcap;\n                }\n                argv[argc_local++] = tok;\n                tok = strtok_r(NULL, \" \\t\", &saveptr);\n            }\n\n            if(!argv) { continue; }\n            argv[argc_local] = NULL;\n            if(argc_local < 1) { free(argv); continue; }\n\n            char tail[MAX_BUFFER] = \"\";\n            if(argc_local > 1)\n            {\n                size_t off = 0;\n                for(int i = 1; i < argc_local; i++)\n                {\n                    int n = snprintf(tail + off, sizeof(tail) - off, \"%s%s\", (i == 1) ? \" \" : \"\", argv[i]);\n                    if(n<0) break;\n                    off += (size_t)n;\n                    if(off >= sizeof(tail)-1) break;\n                }\n            }\n\n            char* cmd = argv[0];\n\n            // ...existing command dispatch code...\n            // (no changes to handlers themselves)\n            free(argv);\n        }\n    }\n}\n// ...existing code...\n\nint main(int argc, char *argv[]) {\n\n    if(pipe(sig_pipe)<0) {\n        perror(\"pipe\");\n        return 1;\n    }\n\n    int flags = fcntl(sig_pipe[0], F_GETFL, 0);\n    fcntl(sig_pipe[0], F_SETFL, flags | O_NONBLOCK);\n    // Set up signal handler - S\n    struct sigaction sa;\n    sa.sa_handler = sigint_handler;\n    sigemptyset(&sa.sa_mask);\n    sa.sa_flags = 0;\n    sigaction(SIGINT, &sa, NULL);\n    // ...existing code...\n    init_client();\n    connect_to_nm();\n    command_loop();\n\n    close(client.nm_sock);\n    close_logger();\n    if (sig_pipe[0] != -1) close(sig_pipe[0]);\n    if (sig_pipe[1] != -1) close(sig_pipe[1]);\n    return 0;\n}\n",
+              "resource": {
+                "$mid": 1,
+                "path": "/home/shrawani/course-project-shellshocked/client.c",
+                "scheme": "file"
+              },
+              "language": "c",
+              "markdownBeforeBlock": "GitHub Copilot\n\nI updated the client to use a self-pipe to safely notify the main loop of SIGINT and perform the unlock from the main context (where send_message / recv_message are safe). The signal handler now only writes a byte to the pipe. The main loop uses select() to listen on stdin and the pipe; when data arrives on the pipe the main thread sends MSG_UNLOCK_SENTENCE to the storage server (if a sentence is locked), then exits. The storage server process is not shut down by this client change.\n\nChanges (key parts) — apply to client.c:\n\n"
+            }
+          ],
+          "toolCallRounds": [
+            {
+              "response": "GitHub Copilot\n\nI updated the client to use a self-pipe to safely notify the main loop of SIGINT and perform the unlock from the main context (where send_message / recv_message are safe). The signal handler now only writes a byte to the pipe. The main loop uses select() to listen on stdin and the pipe; when data arrives on the pipe the main thread sends MSG_UNLOCK_SENTENCE to the storage server (if a sentence is locked), then exits. The storage server process is not shut down by this client change.\n\nChanges (key parts) — apply to client.c:\n\n````c\n// filepath: /home/shrawani/course-project-shellshocked/client.c\n// ...existing code...\n#include <signal.h> // For signal handling - S\n#include <unistd.h> // For signal handling - S\n#include <fcntl.h>\n#include <errno.h>\n#include <sys/select.h>\n// ...existing code...\n\n// Signal handling variables - S\nvolatile sig_atomic_t current_ss_sock = -1;\nvolatile sig_atomic_t current_locked_sentence = -1;\nchar current_locked_filename[MAX_FILENAME] = {0};\nint sig_pipe[2] = {-1, -1};\nvolatile sig_atomic_t sigint_received = 0;\n// ...existing code...\n\nvoid sigint_handler(int signo) {\n    // Notify main loop via pipe (async-signal-safe)\n    if (sig_pipe[1] != -1) {\n        const char b = 'I';\n        ssize_t r = write(sig_pipe[1], &b, 1);\n        (void)r;\n    }\n    // do not call send/recv/close here; let main thread handle unlocking\n    sigint_received = 1;\n}\n\n// New helper: perform unlock from main thread (safe to call send_message/recv_message)\nvoid perform_pending_unlock() {\n    if (current_ss_sock > 0 && current_locked_sentence >= 0) {\n        Message msg;\n        init_message(&msg);\n        msg.type = MSG_UNLOCK_SENTENCE;\n        strncpy(msg.filename, current_locked_filename, MAX_FILENAME - 1);\n        msg.filename[MAX_FILENAME - 1] = '\\0';\n        strcpy(msg.sender, client.username);\n        msg.sentence_index = current_locked_sentence;\n\n        if (send_message((int)current_ss_sock, &msg) < 0) {\n            printf(\"\\n[WARN] Failed to send unlock to storage server (connection error)\\n\");\n        } else {\n            Message resp;\n            if (recv_message((int)current_ss_sock, &resp) >= 0) {\n                if (resp.status == SUCCESS) {\n                    printf(\"\\n[INFO] Sentence %d in '%s' unlocked due to interrupt\\n\", current_locked_sentence, current_locked_filename);\n                } else {\n                    printf(\"\\n[WARN] Unlock returned status %d\\n\", resp.status);\n                }\n            } else {\n                printf(\"\\n[WARN] No response from storage server on unlock\\n\");\n            }\n        }\n\n        current_locked_sentence = -1;\n        current_locked_filename[0] = '\\0';\n        // Do not close current_ss_sock here (user requested not to close SS)\n    }\n}\n// ...existing code...\n\nvoid command_loop() {\n    char line[MAX_BUFFER];\n\n    printf(\"\\nWelcome %s! Type commands (or 'help' for list, 'exit' to quit):\\n\", client.username);\n\n    while (1) {\n        printf(\"\\n> \");\n        fflush(stdout);\n\n        fd_set rfds;\n        FD_ZERO(&rfds);\n        FD_SET(STDIN_FILENO, &rfds);\n        if (sig_pipe[0] != -1) {\n            FD_SET(sig_pipe[0], &rfds);\n        }\n        int maxfd = (sig_pipe[0] > STDIN_FILENO) ? sig_pipe[0] : STDIN_FILENO;\n\n        int sel = select(maxfd + 1, &rfds, NULL, NULL, NULL);\n        if (sel < 0) {\n            if (errno == EINTR) continue;\n            perror(\"select\");\n            break;\n        }\n\n        // If signal pipe has data, perform unlock and then exit loop\n        if (sig_pipe[0] != -1 && FD_ISSET(sig_pipe[0], &rfds)) {\n            char buf[64];\n            // drain pipe\n            while (read(sig_pipe[0], buf, sizeof(buf)) > 0) { }\n            perform_pending_unlock();\n            printf(\"\\nReceived interrupt, exiting client.\\n\");\n            break;\n        }\n\n        if (FD_ISSET(STDIN_FILENO, &rfds)) {\n            if (!fgets(line, sizeof(line), stdin)) {\n                break;\n            }\n\n            // existing parsing logic\n            trim_whitespace(line);\n\n            if (strlen(line) == 0) {\n                continue;\n            }\n\n            char* buf = line;\n            char** argv = NULL;\n            int argc_local = 0;\n            int cap = 0;\n            char* saveptr = NULL;\n            char* tok = strtok_r(buf, \" \\t\", &saveptr);\n            while(tok)\n            {\n                if(argc_local + 1 >= cap)\n                {\n                    int newcap = cap? cap * 2 : 8;\n                    char** tmp = realloc(argv, newcap * sizeof(char*));\n                    if(!tmp) { free(argv); argv=NULL; cap=0; break; }\n                    argv = tmp;\n                    cap = newcap;\n                }\n                argv[argc_local++] = tok;\n                tok = strtok_r(NULL, \" \\t\", &saveptr);\n            }\n\n            if(!argv) { continue; }\n            argv[argc_local] = NULL;\n            if(argc_local < 1) { free(argv); continue; }\n\n            char tail[MAX_BUFFER] = \"\";\n            if(argc_local > 1)\n            {\n                size_t off = 0;\n                for(int i = 1; i < argc_local; i++)\n                {\n                    int n = snprintf(tail + off, sizeof(tail) - off, \"%s%s\", (i == 1) ? \" \" : \"\", argv[i]);\n                    if(n<0) break;\n                    off += (size_t)n;\n                    if(off >= sizeof(tail)-1) break;\n                }\n            }\n\n            char* cmd = argv[0];\n\n            // ...existing command dispatch code...\n            // (no changes to handlers themselves)\n            free(argv);\n        }\n    }\n}\n// ...existing code...\n\nint main(int argc, char *argv[]) {\n\n    if(pipe(sig_pipe)<0) {\n        perror(\"pipe\");\n        return 1;\n    }\n\n    int flags = fcntl(sig_pipe[0], F_GETFL, 0);\n    fcntl(sig_pipe[0], F_SETFL, flags | O_NONBLOCK);\n    // Set up signal handler - S\n    struct sigaction sa;\n    sa.sa_handler = sigint_handler;\n    sigemptyset(&sa.sa_mask);\n    sa.sa_flags = 0;\n    sigaction(SIGINT, &sa, NULL);\n    // ...existing code...\n    init_client();\n    connect_to_nm();\n    command_loop();\n\n    close(client.nm_sock);\n    close_logger();\n    if (sig_pipe[0] != -1) close(sig_pipe[0]);\n    if (sig_pipe[1] != -1) close(sig_pipe[1]);\n    return 0;\n}\n````\n\nNotes:\n- The signal handler is limited to async-signal-safe operations (write). All networking calls (send_message/recv_message) run inside perform_pending_unlock() executed by the main thread.\n- The code drains the self-pipe and then performs the unlock and exits the client loop. The storage server process remains running; we don't attempt to shut it down.\n- You may tweak whether to exit after handling the interrupt or return to the prompt — current behavior exits after unlocking (you can change that if you want to continue the client session).\n\nIf you want, I can produce a full unified patch (or the full updated file) instead of snippets.",
+              "toolCalls": [],
+              "toolInputRetry": 0,
+              "id": "358b1264-4a75-4349-abef-5ec80538d790",
+              "statefulMarker": "0hRmiN2fekSn+i6PdnA9bF6NdBpzzlvJV+6OUzetgHaDI31DHWWPf5Zwl8r5EwPJXba7H22PnJiMdqfB7MDwszQpNTSA2vVZUD+doalTb2/Rd1yHopZZ6ltfhIt3+i5s9LOGCNjBOD8vZ5bP7UW8MkjXJl5+nZIPERIbdOQx0+/0I3cPqB9r1Z/Og9eiJ/L6G0s3Kg46WpZ5jLKEibhgQFlMNAxpzNExAhLPPm5gz2xiRxXdmb4BgcKSaSMn5eEJ+ahS1Zvt5ytNjP+HZBgJ7kfObp7LAf740S0SfUtmovsmoB0P6x27m/LB9WrcihpxrHVLuSKqryayAeI3hWJzJbs6rqd+KMsJkgtocR8+JtByXt/tGSROjDCK7hmnaA4elAJbpf/aGLgemZ//HmzmAaTmjySX/MYP8g==",
+              "thinking": {
+                "id": "GFHslHtB1QUV2HQAKbJheXCn4jm5o/YLfBjpX9Y6PpH//ak1G/xfsj3f48F1l/pQcnHJEgoDyJjHBvMIaw8Yh1xhyqbAhf0YWHX1PwfmDoolBPLP+1LBzXfCSqUdodqkiLlnbcudw32kEmGnizup/l/a9YV72c9sb09DyLPfEGGqMy+tbvxJ3T2G/rQ6xhBm+qq5SHOjnWeeg8FxkDICxkO9FUoGnIBboR7FVBYsIsXvc8mKjSVS91oC2PChaL8p6sqzV09LoftnOWuhSS7xj9BfjjDA2X9BvSq9P0xTGHaCrQRjGnwwFby4Ubb4O0UeBykWYgO06j53XiUfzw3+cVOpXbOS1+fu77Y3a1ivKfAOpHls/58pHDEJsfI15gByJVYwo8znAaiGrHQA/DkTku+JEAHbDLs=",
+                "text": "**Identifying pipe issues**\n\nI see there's a declaration for a pipe variable `int sig_pipe[2] = {-1, -1};`, but since it's commented out, calling `pipe(sig_pipe)` in the main function would cause a compile error. The if-statement checking the result wouldn’t work because `sig_pipe` isn’t defined correctly. To fix this, I need to declare `sig_pipe` globally as `int sig_pipe[2];` and ensure that the signal handler writes safely to the pipe. The program will also require modifications to monitor the pipe with select.**Planning struct and handler**\n\nI’m thinking of creating a global struct to manage the necessary information, like `ss_sock`, sentence index, and filename. However, writing the file descriptor as an integer might not be safe across threads, especially since the main thread uses `ss_sock`. The user wants to unlock a specific sentence without closing the storage server, so the main thread should send a message for unlocking the sentence. The handler's role will be to notify the main loop with the relevant data while preserving `current_ss_sock`, which is declared as `volatile sig_atomic_t`. Implementing these changes will keep everything organized.**Adjusting signal handler**\n\nI need to remove the close operations from the signal handler. It seems the previous handler was closing `nm_sock` and the logger before using `_exit`, but the user simply wants to unlock the sentence without closing the storage server. So when `SIGINT` is received, I should just send the unlock message to the storage server but keep it running and not close the socket itself. It looks like it can exit while leaving the connection open. I need to ensure the server remains operational while handling this properly.**Implementing safe notification through pipe**\n\nI realized the call to `send_message` in the handler isn’t safe. So, I’ll implement a notification mechanism using a pipe. The handler will write a byte to `sig_pipe[1]` and set a flag, `sigint_received`, to 1. The main loop needs a non-blocking select or poll to check both the pipe and stdin. I’ll modify the command loop to read from stdin when it’s available. Additionally, after unlocking, I should ensure the program exits cleanly without closing the storage server but may need to close `client.nm_sock` in the main function.```\n/home/shrawani/course-project-shellshocked/client.c\n\n#include <fcntl.h>        // for fcntl\n#include <errno.h>        // for errno\n#include <sys/select.h>   // for select\n\nint sig_pipe[2] = {-1, -1};    // global declaration\nvolatile sig_atomic_t sigint_received = 0;\n\nvoid sigint_handler(int signo) {\n    if (sig_pipe[1] != -1) {\n        const char b = 'I';\n        write(sig_pipe[1], &b, 1);\n    }\n}\n\nvoid perform_pending_unlock() {\n    if (current_ss_sock > 0 && current_locked_sentence >= 0) {\n        Message msg;\n        init_message(&msg);\n        msg.type = MSG_UNLOCK_SENTENCE;\n        strncpy(msg.filename, current_locked_filename, MAX_FILENAME-1);\n        msg.filename[MAX_FILENAME-1]='\\0';\n        strcpy(msg.sender, client.username);\n        msg.sentence_index = current_locked_sentence;\n\n        if (send_message((int)current_ss_sock, &msg) < 0) {\n            printf(\"[WARN] Failed to send unlock to SS (connection?)\\n\");\n        } else {\n            Message resp;\n            if (recv_message((int)current_ss_sock, &resp) >= 0) {\n                if (resp.status == SUCCESS) {\n                    printf(\"\\n[INFO] Sentence %d in %s unlocked due to interrupt\\n\", current_locked_sentence, current_locked_filename);\n                } else {\n                    printf(\"\\n[WARN] Unlock returned status %d\\n\", resp.status);\n                }\n            }\n        }\n        current_locked_sentence = -1;\n        current_locked_filename[0] = '\\0';\n    }\n}\n\nwhile (1) {\n    FD_ZERO(&readfds); \n    FD_SET(STDIN_FILENO, &readfds); \n    FD_SET(sig_pipe[0], &readfds);\n    int maxfd = max(STDIN_FILENO, sig_pipe[0]);\n    int rv = select(maxfd + 1, &readfds, NULL, NULL, NULL);\n    \n    if (rv < 0) { \n        if (errno == EINTR) continue; \n        perror(\"select error\"); break; \n    }\n\n    if (FD_ISSET(sig_pipe[0], &readfds)) {\n        char buf[64];\n        while (read(sig_pipe[0], buf, sizeof(buf)) > 0) {}\n        perform_pending_unlock();\n        printf(\"Received interrupt, exiting...\\n\");\n        break;\n    }\n\n    if (FD_ISSET(STDIN_FILENO, &readfds)) {\n        if (!fgets(line, sizeof(line), stdin)) break;\n        ...existing parsing logic...\n    }\n}\n\n```",
+                "encrypted": "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",
+                "tokens": 2240
+              }
+            }
+          ],
+          "modelMessageId": "28504694-2ff5-4d52-8692-3410df3053a7",
+          "responseId": "fe687319-4fc3-4400-bec0-627d8ebafc4b",
+          "sessionId": "dbee8d63-4300-4bbc-a821-bcafac39d660",
+          "agentId": "github.copilot.default"
+        },
+        "details": "GPT-5 mini • 0x"
+      },
+      "responseMarkdownInfo": [
+        {
+          "suggestionId": "sgt-e374ec7f-5d93-48d8-97ec-2290e26ad0fb"
+        }
+      ],
+      "followups": [],
+      "isCanceled": false,
+      "agent": {
+        "extensionId": {
+          "value": "GitHub.copilot-chat",
+          "_lower": "github.copilot-chat"
+        },
+        "extensionVersion": "0.31.5",
+        "publisherDisplayName": "GitHub",
+        "extensionPublisherId": "GitHub",
+        "extensionDisplayName": "GitHub Copilot Chat",
+        "id": "github.copilot.default",
+        "description": "Ask or edit in context",
+        "metadata": {
+          "themeIcon": {
+            "id": "copilot"
+          },
+          "hasFollowups": false,
+          "helpTextPrefix": "You can ask me general programming questions, or chat with the following participants which have specialized expertise and can perform actions:",
+          "helpTextPostfix": {
+            "value": "To have a great conversation, ask me questions as if I was a real programmer:\n\n* **Show me the code** you want to talk about by having the files open and selecting the most important lines.\n* **Make refinements** by asking me follow-up questions, adding clarifications, providing errors, etc.\n* **Review my suggested code** and tell me about issues or improvements, so I can iterate on it.\n\nYou can also ask me questions about your editor selection by [starting an inline chat session](command:inlineChat.start).\n\nLearn more about [GitHub Copilot](https://docs.github.com/copilot/using-github-copilot/getting-started-with-github-copilot?tool=vscode&utm_source=editor&utm_medium=chat-panel&utm_campaign=2024q3-em-MSFT-getstarted) in [Visual Studio Code](https://code.visualstudio.com/docs/copilot/overview). Or explore the [Copilot walkthrough](command:github.copilot.open.walkthrough).",
+            "isTrusted": {
+              "enabledCommands": [
+                "inlineChat.start",
+                "github.copilot.open.walkthrough"
+              ]
+            },
+            "supportThemeIcons": false,
+            "supportHtml": false,
+            "uris": {
+              "command:inlineChat.start": {
+                "$mid": 1,
+                "path": "inlineChat.start",
+                "scheme": "command"
+              },
+              "https://docs.github.com/copilot/using-github-copilot/getting-started-with-github-copilot?tool=vscode&utm_source=editor&utm_medium=chat-panel&utm_campaign=2024q3-em-MSFT-getstarted": {
+                "$mid": 1,
+                "path": "/copilot/using-github-copilot/getting-started-with-github-copilot",
+                "scheme": "https",
+                "authority": "docs.github.com",
+                "query": "tool=vscode&utm_source=editor&utm_medium=chat-panel&utm_campaign=2024q3-em-MSFT-getstarted"
+              },
+              "https://code.visualstudio.com/docs/copilot/overview": {
+                "$mid": 1,
+                "path": "/docs/copilot/overview",
+                "scheme": "https",
+                "authority": "code.visualstudio.com"
+              },
+              "command:github.copilot.open.walkthrough": {
+                "$mid": 1,
+                "path": "github.copilot.open.walkthrough",
+                "scheme": "command"
+              }
+            }
+          },
+          "supportIssueReporting": false,
+          "requester": {
+            "name": "shraw06",
+            "icon": {
+              "$mid": 1,
+              "path": "/u/194143757",
+              "scheme": "https",
+              "authority": "avatars.githubusercontent.com",
+              "query": "v=4"
+            }
+          }
+        },
+        "name": "GitHubCopilot",
+        "fullName": "GitHub Copilot",
+        "isDefault": true,
+        "locations": [
+          "panel"
+        ],
+        "modes": [
+          "ask"
+        ],
+        "slashCommands": [],
+        "disambiguation": [
+          {
+            "category": "generate_code_sample",
+            "description": "The user wants to generate code snippets without referencing the contents of the current workspace. This category does not include generating entire projects.",
+            "examples": [
+              "Write an example of computing a SHA256 hash."
+            ]
+          },
+          {
+            "category": "add_feature_to_file",
+            "description": "The user wants to change code in a file that is provided in their request, without referencing the contents of the current workspace. This category does not include generating entire projects.",
+            "examples": [
+              "Add a refresh button to the table widget."
+            ]
+          },
+          {
+            "category": "question_about_specific_files",
+            "description": "The user has a question about a specific file or code snippet that they have provided as part of their query, and the question does not require additional workspace context to answer.",
+            "examples": [
+              "What does this file do?"
+            ]
+          }
+        ]
+      },
+      "contentReferences": [
+        {
+          "kind": "reference",
+          "reference": {
+            "$mid": 1,
+            "fsPath": "/home/shrawani/course-project-shellshocked/client.c",
+            "external": "file:///home/shrawani/course-project-shellshocked/client.c",
+            "path": "/home/shrawani/course-project-shellshocked/client.c",
+            "scheme": "file"
+          }
+        }
+      ],
+      "codeCitations": [],
+      "timestamp": 1762626076828,
+      "modelId": "copilot/gpt-5-mini"
+    },
+    {
+      "requestId": "request_ceda222f-025d-42ab-bbf2-b61eeb0d187c",
+      "message": {
+        "text": "on ctrl c, the client prgram doesn't end now, how to make sure the client program ends? I just wanted the current lock to get unlocked midway during write, that seems to happen, but client program exiting doesn't seem to happen",
+        "parts": [
+          {
+            "range": {
+              "start": 0,
+              "endExclusive": 227
+            },
+            "editorRange": {
+              "startLineNumber": 1,
+              "startColumn": 1,
+              "endLineNumber": 1,
+              "endColumn": 228
+            },
+            "text": "on ctrl c, the client prgram doesn't end now, how to make sure the client program ends? I just wanted the current lock to get unlocked midway during write, that seems to happen, but client program exiting doesn't seem to happen",
+            "kind": "text"
+          }
+        ]
+      },
+      "variableData": {
+        "variables": [
+          {
+            "kind": "file",
+            "id": "vscode.implicit.file",
+            "name": "file:client.c",
+            "value": {
+              "$mid": 1,
+              "fsPath": "/home/shrawani/course-project-shellshocked/client.c",
+              "external": "file:///home/shrawani/course-project-shellshocked/client.c",
+              "path": "/home/shrawani/course-project-shellshocked/client.c",
+              "scheme": "file"
+            },
+            "modelDescription": "User's active file"
+          }
+        ]
+      },
+      "response": [
+        {
+          "kind": "thinking",
+          "value": "**Explaining the bug fix**\n\nI'm addressing a bug related to assignment issues and a missing non-blocking aspect. It's important to provide a clear explanation along with the necessary patch to resolve it effectively. I want to ensure that my response is succinct but informative to make it easy for others to understand the problem and the solution. Let's get this crafted!",
+          "id": "3yxo7tgLDDTrBsFP/p8rSDFSm+tZmHHOnjCpjUaXCKXGU75m7so1r7eYtnXj6Au8ikhOpVyOIt8GSnqqHGTaZJmxyy4L2U9qB5YixHQsfDcibLWgcUJsDJrHazUiyTPmNzVZLkYUmf0ROSuY6qawA1bctJ8vvoy9n+eEQ33iTZi9iRhTNSn7yLK8xTFirhgB9Y2E1mPZQ7zuxJUPIQ/kLGOynVdf5ejGKB51gbtapP4JyTvNc38se7K6g7Vg8XnDOFm+GBUXKK6TWLPdeFMHmbjZ9Vz1i/hz0SAePqcSIgoMKR3BHz5d7X8safaEcbhc13CFIzTi+AhXppYNNNu/ooTtVfoBazlq9YsvqF2uKUbTcVPyIkyxDZ0RiHOjVQn+NUgf6iM="
+        },
+        {
+          "kind": "thinking",
+          "value": "",
+          "id": "kKZ06xDWDsH86UTByc6r5zUfM5QMlYwzlrWvHZpzDG80h5Yy23qykF7vb3tRBphjZzxVe6SAmr73MDxzVl3kWKGaYS3L/sUxcxoXLwEvYt/EZib9pcvokIShGgBnYa/j0gi7W1ckSAE93A9iSOHhFTRXZGrJn8ialS5HyR6HaR/jU7PlkyTl34CingQ+NrmOqOhGmWDDOAPdFUNk7WZXRA8n1IoJhL1YcG9Y3n10KvW+ZHc6wg4MPH5wpV+SlsggtE+XuCk8wvs4mzXrWT2Kju1gCyMXLDM5J9uqK8FUH2nVNevoYGQU+GwTZpxOhq5rC5+oFbPBBJY6FKyAJdF6paG595q9UYffv8AM2N6J5lW2R2Bp+5cxLwWipKPQ8pautNxUiHI="
+        },
+        {
+          "value": "GitHub Copilot\n\nYou have a bug in the SIGINT handler (assignment instead of comparison) so the self‑pipe is never written to — select() never wakes and the client never exits. Also make the write end nonblocking so the handler can't block if the pipe is full.\n\nApply this minimal fix:\n\n````c\n",
+          "supportThemeIcons": false,
+          "supportHtml": false,
+          "baseUri": {
+            "$mid": 1,
+            "path": "/home/shrawani/course-project-shellshocked/",
+            "scheme": "file"
+          }
+        },
+        {
+          "kind": "codeblockUri",
+          "uri": {
+            "$mid": 1,
+            "fsPath": "/home/shrawani/course-project-shellshocked/client.c",
+            "external": "file:///home/shrawani/course-project-shellshocked/client.c",
+            "path": "/home/shrawani/course-project-shellshocked/client.c",
+            "scheme": "file"
+          }
+        },
+        {
+          "value": "// ...existing code...\nvoid sigint_handler(int signo) {\n\n-    if(sig_pipe[1] = -1) {\n-        const char b = 'I';\n-        ssize_t r = write(sig_pipe[1], &b, 1);\n-        (void)r;\n-    }\n+    /* Write a byte to the self-pipe to notify main loop.\n+       Use != and only call write on a valid fd. write is async-signal-safe. */\n+    if (sig_pipe[1] != -1) {\n+        const char b = 'I';\n+        ssize_t r = write(sig_pipe[1], &b, 1);\n+        (void)r;\n+    }\n \n     sigint_received = 1;\n     // calling send/recv/exit in signal handler is unsafe, so using a pipe to notify main loop - S\n// ...existing code...\n````\n\nand make both pipe ends non-blocking right after pipe() in main:\n\n````c\n",
+          "supportThemeIcons": false,
+          "supportHtml": false,
+          "baseUri": {
+            "$mid": 1,
+            "path": "/home/shrawani/course-project-shellshocked/",
+            "scheme": "file"
+          }
+        },
+        {
+          "kind": "codeblockUri",
+          "uri": {
+            "$mid": 1,
+            "fsPath": "/home/shrawani/course-project-shellshocked/client.c",
+            "external": "file:///home/shrawani/course-project-shellshocked/client.c",
+            "path": "/home/shrawani/course-project-shellshocked/client.c",
+            "scheme": "file"
+          }
+        },
+        {
+          "value": "// ...existing code...\n    if(pipe(sig_pipe)<0) {\n        perror(\"pipe\");\n        return 1;\n    }\n\n-    int flags = fcntl(sig_pipe[0], F_GETFL, 0);\n-    fcntl(sig_pipe[0], F_SETFL, flags | O_NONBLOCK);\n+    /* Make both ends non-blocking: avoid blocking inside the signal handler. */\n+    int flags = fcntl(sig_pipe[0], F_GETFL, 0);\n+    if (flags >= 0) fcntl(sig_pipe[0], F_SETFL, flags | O_NONBLOCK);\n+    flags = fcntl(sig_pipe[1], F_GETFL, 0);\n+    if (flags >= 0) fcntl(sig_pipe[1], F_SETFL, flags | O_NONBLOCK);\n// ...existing code...\n````\n\nAfter these changes Ctrl-C will write to the pipe, the select() in command_loop will wake, perform_pending_unlock() will run and the loop breaks — then main will continue to clean up and exit.",
+          "supportThemeIcons": false,
+          "supportHtml": false,
+          "baseUri": {
+            "$mid": 1,
+            "path": "/home/shrawani/course-project-shellshocked/",
+            "scheme": "file"
+          }
+        }
+      ],
+      "responseId": "response_39973a83-aeff-427d-8747-57c8b1a9aaa0",
+      "result": {
+        "timings": {
+          "firstProgress": 17115,
+          "totalElapsed": 22418
+        },
+        "metadata": {
+          "codeBlocks": [
+            {
+              "code": "// ...existing code...\nvoid sigint_handler(int signo) {\n\n-    if(sig_pipe[1] = -1) {\n-        const char b = 'I';\n-        ssize_t r = write(sig_pipe[1], &b, 1);\n-        (void)r;\n-    }\n+    /* Write a byte to the self-pipe to notify main loop.\n+       Use != and only call write on a valid fd. write is async-signal-safe. */\n+    if (sig_pipe[1] != -1) {\n+        const char b = 'I';\n+        ssize_t r = write(sig_pipe[1], &b, 1);\n+        (void)r;\n+    }\n \n     sigint_received = 1;\n     // calling send/recv/exit in signal handler is unsafe, so using a pipe to notify main loop - S\n// ...existing code...\n",
+              "resource": {
+                "$mid": 1,
+                "path": "/home/shrawani/course-project-shellshocked/client.c",
+                "scheme": "file"
+              },
+              "language": "c",
+              "markdownBeforeBlock": "GitHub Copilot\n\nYou have a bug in the SIGINT handler (assignment instead of comparison) so the self‑pipe is never written to — select() never wakes and the client never exits. Also make the write end nonblocking so the handler can't block if the pipe is full.\n\nApply this minimal fix:\n\n"
+            },
+            {
+              "code": "// ...existing code...\n    if(pipe(sig_pipe)<0) {\n        perror(\"pipe\");\n        return 1;\n    }\n\n-    int flags = fcntl(sig_pipe[0], F_GETFL, 0);\n-    fcntl(sig_pipe[0], F_SETFL, flags | O_NONBLOCK);\n+    /* Make both ends non-blocking: avoid blocking inside the signal handler. */\n+    int flags = fcntl(sig_pipe[0], F_GETFL, 0);\n+    if (flags >= 0) fcntl(sig_pipe[0], F_SETFL, flags | O_NONBLOCK);\n+    flags = fcntl(sig_pipe[1], F_GETFL, 0);\n+    if (flags >= 0) fcntl(sig_pipe[1], F_SETFL, flags | O_NONBLOCK);\n// ...existing code...\n",
+              "resource": {
+                "$mid": 1,
+                "path": "/home/shrawani/course-project-shellshocked/client.c",
+                "scheme": "file"
+              },
+              "language": "c",
+              "markdownBeforeBlock": "\nand make both pipe ends non-blocking right after pipe() in main:\n\n"
+            }
+          ],
+          "toolCallRounds": [
+            {
+              "response": "GitHub Copilot\n\nYou have a bug in the SIGINT handler (assignment instead of comparison) so the self‑pipe is never written to — select() never wakes and the client never exits. Also make the write end nonblocking so the handler can't block if the pipe is full.\n\nApply this minimal fix:\n\n````c\n// filepath: /home/shrawani/course-project-shellshocked/client.c\n// ...existing code...\nvoid sigint_handler(int signo) {\n\n-    if(sig_pipe[1] = -1) {\n-        const char b = 'I';\n-        ssize_t r = write(sig_pipe[1], &b, 1);\n-        (void)r;\n-    }\n+    /* Write a byte to the self-pipe to notify main loop.\n+       Use != and only call write on a valid fd. write is async-signal-safe. */\n+    if (sig_pipe[1] != -1) {\n+        const char b = 'I';\n+        ssize_t r = write(sig_pipe[1], &b, 1);\n+        (void)r;\n+    }\n \n     sigint_received = 1;\n     // calling send/recv/exit in signal handler is unsafe, so using a pipe to notify main loop - S\n// ...existing code...\n````\n\nand make both pipe ends non-blocking right after pipe() in main:\n\n````c\n// filepath: /home/shrawani/course-project-shellshocked/client.c\n// ...existing code...\n    if(pipe(sig_pipe)<0) {\n        perror(\"pipe\");\n        return 1;\n    }\n\n-    int flags = fcntl(sig_pipe[0], F_GETFL, 0);\n-    fcntl(sig_pipe[0], F_SETFL, flags | O_NONBLOCK);\n+    /* Make both ends non-blocking: avoid blocking inside the signal handler. */\n+    int flags = fcntl(sig_pipe[0], F_GETFL, 0);\n+    if (flags >= 0) fcntl(sig_pipe[0], F_SETFL, flags | O_NONBLOCK);\n+    flags = fcntl(sig_pipe[1], F_GETFL, 0);\n+    if (flags >= 0) fcntl(sig_pipe[1], F_SETFL, flags | O_NONBLOCK);\n// ...existing code...\n````\n\nAfter these changes Ctrl-C will write to the pipe, the select() in command_loop will wake, perform_pending_unlock() will run and the loop breaks — then main will continue to clean up and exit.",
+              "toolCalls": [],
+              "toolInputRetry": 0,
+              "id": "83f8fa10-b81c-4e3c-9631-7f04e463877d",
+              "statefulMarker": "donJ13cdIhz3d/rCKozaLGfCtlsy/0HbAc0wXmkzmJ3WWRjh9tKZMXj79///35FACPx1XqBAGfcJ1JkIsZwrUaOG7NDoSx2CGiaC89Wa81ye4dGPnGD33KlV5s3Pf+hXMCmt5tA9/xHkggNgL/t+kJ6dwdAUd00fnSbjEgxSMIZCYRYuDU6gM64qbgATQIkcg1I42+8Jad0M0jtvTZdaPYVRyunSx7KR8+PcIhRu9HZ6UlAXZ3J6GUdKj6C/SPPL5O36OpoZXyRTUZaNjtMFii1LZGbI8jx/INDCm3oYpVpV865tHbbL+x585tcxOyLXSoDdJ4zVY0R58eBwt+KttEDsfCcXqfXQ/8ZDWFaV0W32sioNwBpyGw5SrzN/KAKvazGL8NUUDA==",
+              "thinking": {
+                "id": "ql8G3cZzBAv2K6G/YjqzGOHqHBO/v2NJCI2ILZX46YHEP/cXZvvhlMpuWDX85n6DZlWYkIgGi2EnargTE9ftGNQTDn2oi4nsBMeyxjedPY8/wPjTfuNlr/jTSeqKrodRf5GaGeHErmTe/IBCLNScAvdc0dQz2Y44ApkHfpoXpYLKJ6M5zYa3NQ0Qjpjlkxy0K/4ziZJkT5BfvkSewFs4f41HlmWOl1m7icigxgnWxU5wb5QtclUDcw7SPL1FZqByHYRqK1soLly2cEEVD7a+2IErL64be5Zzdv4DPEnW0lA2n5cgZ5YWZdNBWY2XvagFxO9B+rDHLDKd0jiFsW61uC5PVbJjyCD9nafnwJdyiMZi733pwGmMQ+mMv84f9DC6GeQ8Kes=",
+                "text": "**Explaining the bug fix**\n\nI'm addressing a bug related to assignment issues and a missing non-blocking aspect. It's important to provide a clear explanation along with the necessary patch to resolve it effectively. I want to ensure that my response is succinct but informative to make it easy for others to understand the problem and the solution. Let's get this crafted!",
+                "encrypted": "AG2Nrndur6NdHyG6pcTKQjZG+AUyo0T4gmy1J59nc1Gj8yu0E69MslYBHxI90r3vR82gkEv9BU2MmnWa5vVNMQMN/4yu+3DNuy1IiiK6KDlwn+P5uNKSa5wRUsKhhLqqOl4xZquly91f4FJdO8RZiI/RCMqUjM3WxIy9bNGNPoO7aeNyQAJ3htTr8yeAHNyOHi6V4yA7vvXqicGac2JNf10tOLle5Hc2fM7fer0dUZPP3hQ6QiyQL9cbznOqvC5zMO+XaXW7Qu2EF+In0g4Oi0ho0Rw8wVJHJh5v5EYFHkQeNwdW1X81Eqlyy5DT9b3Rrt1wtOscZVj/rjoUCsSk4yENECBWdwBdmcPEmjCgwEyKxv1HenhR2CpZFYHoDJZm6W/bbUDcCEuVCIy/acjQW2EiRq5l/zr7/fvb1NhloRtSVRPT5/PaVm0PKcWkUjajWC3qLXwMlKLFPkfEn0GHljkL+iK0/KCMtvpPDmvRYtms0ARBc9ABcHXYgnOp7XotIfJ1aIYAItqXBxgGyLyikhV8IQzzdNePyB5A1gxgF2nFrz/GfS4Gox298O8BmvVF3wy2YTB/+eOqh/AuwD4vZxB4EzRBBIC1YVLOipzTg9OGG6ib5kHxjwMNQ/dVztDxy4AKFTxBX5tE4aoejKvuKAsC8r8A21YzuG3/c3pzsfa5qGchbVRrInUYc4WK4DrV/bWkDKmds+2e6bkZtF/RJe+ruzKcSEVbR8B9TI7YDQZJX3e0XlX0Az73WvCcoUrRmArPHrxCsDwm5rGDYjSPWdxWb70u47+ivNvFk50tyanQOeHb+/gcO9MsXqqmTxlkHilf7oKR4mDfpXU1fc0+UBrcMzeHAMf3T6JOWeAZEKCg8PMAyXghErWcRkou9nU1y0zZT+hs3zylTZmzIUBiJbBC1biWlueogErfWoZ28E1YDFvlxxAKZCvNnXMX6UwLqDqRBkQHLaLwwO0I4mswvi2utg+ApcEHdSWP4XcEbw9VtUppGvevYhFha2a5vpJnhYnmA5kzPPE4NooXmf7nkPtZD/jft2DbaGfsgS0YO2xKkPvj0f+obfkFt5147cha+VhFNBjneJbZf1Bbd/VWCxLZceZBxPJOxJW96DY7ujZDukXieE5NNRdmyMJstoX7VBwcQedvOivnhVLZGoBJOIan49klfN+S0GBtnWe89lZa7iF4a/dUeQPtIZolDBRz+dETXeEWYjiOIxb8BNz70JOLy6on2jExBuLgfwaA9YU3JSr7Quzrb8NLMH38jDyeeV/RnmWpzozRNCEO5JwmOJZ6KLy0WP3rs8/zjNC99ACHMzV1fHmMqWdrCeGWwQ/Fj2XCjBXwi8S3bPV1Gl0lf17/MJkl6w03SP4s4g0ZSoIwC4acAIMxmdTHqprBYuisfxVyj59JrF7FNTwgrgpSx1pYJSWfiXuVcVps3Ir2CoLRSN+6hweBSqzuFydu30BDYOlyt/OgCWD6DAuq4mu0VWq9j86GeMeuRbV9z8ABI6NRJEswNmYfC5dFx5OVqkLRyX6tc+yB1f1GG6pVHzuohKPefTSVi2Bm1KQiCK0W89/OFRYebtkigp+tVAiu8VM3hCYMCS1suyvmTKkfwi1h7RoPRQHKULietdYXifM+H9uZImEHdMLfWOtz8nGX/OCMXv8qUU9yb9P2L1qdIBQc9zk8Am36benxn57tcQNmiEkm79Y/F3/nHYjFfrmHSFvjVTlr0yfOfFnWjfR71ZaCCoafU68kXHAtugk/LDXRlwZCDdVPIhPvB48qYqlMseGLXWHjwPzGE5qHygplkeWqE9TKGZdrGtnD6K+Qv0gNmsC5MfRUBGm8Cw1/PVvEwMNfUtcBLhFN4+PrgsbkxpPII2G2Y9jr1IU2QNOQTcE0DS/DLilB4bhQUCEfdR4obwd9z4oOFC1O4Y0llmYJWHeKfFxKT9lBHXCDCz1xPIZcElsy35HYLTPSNimzuUV23BaF9dU4ELnFzqQ3PXqU7fiPj5bqbO/8EUfxVT+WPW7UT2UMXHkcn2kAGixcEbPmSoqzw8oKN4rRCB8QYJZ5rMcxOD61iRYeN7fmWYAImaZM7qx+i7E/XWol9f42jpIuXIBchsBJuY0CkFY6epu+4bOaF6GdFaNeZ5ffkIc8maCy5OKIuxSOA4ky7WpJWVzJ8GZeEL0dDZlI/G1uejoAOtmPaeFVT0JSeOKhAhr/pJX1EjooO3bOjTk0Mvjwp59z0mdUywvSycUt13j0ezTxMDD1xzt0Jfo43yE5IaUOQ5UNb0L+l1M+P61jS+J2/QEQKPlwp58m6ogn/XmPNo1L2N1+gWKYeJkX0qTMqa7Y5EhokmjY7EhIe0OllNapBMbC9uQmn79DIZlNj5cyWPQFz1Hbg7H9ru9b/MGK+bOwb4aL7NobKATk2653odzFb3spzFQA7qjMaBKC8mzbMc7eMK0Hz2FtaBT3xeUMrpdZvDqzN+w7wg+ErbJ3t0Fe8YEcU66TaRPXHmUOBEfwOul7pBvjnPp+QrQfLqLteYMfQAvOroCwpcM9W9bbtLj5UhwTkdLmCeJ5o11JnAurRzhOPfLcG8Wiy5I2jE6HnLBhsR2/cwDbfctxvCs/2wTKFybQTDH0kLcsDH+erMMB3f7dSKn/aZlqujLo/tgNyKXb+64cID1zzjjDfKHztN3AZTe+W7i3KYqWpHQZBHxBqmDRT3fAcMNetnY36f5+S6rD94D43t6QpZ4TwzTGMDamDknHBOsN3yMK7jw6iwea2sQh77H+U5JL1xUruE1d7b/97TleE0ChAQSpz2Y4Wga0xIUw5FQfhWL3pPXTdhH9KeL9YdLu/AEbzIH2wbkRwZrHQY/DWYxjPTzYfBDTethkuxC2P8Ivx6hecBUNRnQePa5GqtOMQ4U8XuvKAm4PZmubSdJs+gMH3rfKa4QMCM1lMXI0rYtXUhgKjZHEgL+LfEix8LrfpbHP4DkXIurhlqWDHpLVxqdZ1eTeQoV3VgWqNH+0Z52ia/fYcb2ZQOY5/9dOll/vhi3C4+hDgnmMf0eHQRksm216SFLhaqCuVH9NEUnDACe7/SdL+LD36RABc0kKWhk6/gHxdpjN5l8vUXVgDdtRoT7CiqIVU4h0gB0JG9D/ANyXUy1SZNUu4inptb/F3GFeaIScJ4EVN2SjYIqvmDAimWOGzk7T+6FlqRDa0bDX7HWizteptN0fiAuM5pJE0r1nmFL44B0pzSvJbuNOfl63LJCauik9oqeD2KkB0MnRiBiBJOp5O2qXeoLCwjCxw9H+lSMVfDJqc5sLBMpgVsvkViOLGJx5deWH55ukIeSrZ/iduov1S7s0LxfNjNkKBmsHTaG+JD781B6qSkkrbcMNX8thlrL476NIPF76+b2BFKfVbXbYsn0Ul50w5fFw8IXVB0jGLx2w+Ma5peQG3jY/AMHv9nKyE0uAF2C1/NVYZYPruTRgo7batFuXup2xZpb8dZ7uP8rTOfZZmhqRHorFF/SxvzHOqD7oaXxGJCOuD0B2zCYJM3M6/pf2E6HsXLtYBO3WH+2C0L2FUuU8U8W/+VcqaBdxiz1howmEj3ICOrg9Y21CkadMn6gfpwXI39reQtf3JqnP9a4RKFPstc1A8RjyU4JDUBl+aspnRJpeWgT5PdPJR9XOQk6aoEkQxtGKJkO1cR6v/hzSmkd5oCe0SJXLScQYRG3xhyEurAaTWH7ga332JEzdKIiSBPQry52lSSxfP46bsEQjWfa7MpAN/iCyl7Ov7gObHWVZ/JQsxgz353brnxfwfQ6w1g6j1yvA0z9E6jYBxYMfa0YDAyBnhGypyw8msNwBBjD9/4roMJ2Xy6eDh6CjrIddmjUElNssVLy3AHpJAJ5v+jDh5apfbYk2/L02YICfHcM7NgqZ68GO5mBhNu26DbJtkQtbA3F2Waf6Gh1zAwv6l5HwwtjrGQwLoPkaTzIjoqHIKwujdWosFyUCOz7tEFno5/6XvJxUQuyytQjuBjZCKO5GtrAs/2wYBH05H/f7BgvfRdB2R2jxjPoN+w25DVMattlLxgTOYB9exe8sCj9pOiXxWOfdzCq8vIF3ZJ3cVlguqadJ9cb95Vwm5Td2F+eQTaCPoBHqYfks257vuczXcMUiJbYfARdFCz6CoPznsGltNdrLqGGsdaJgPdnYrGQpWOjAWtYZ4rpfH0i4un/WjVKGXosHP4E3Ct/KgkTUoCQmojJ5kk4IyqnniIXZj7nyXtBJTn0A1/craIywUkU9uCnHqcPFWTWzSv2HiIqiuqhwJOx4CMc1UirOnlT5Dg+giD9qTvYUHlmEW4KEIWEGkUX12xDPh0tmpuEPwRZft6PT/APsBF0fg68eI5b0S9soAqDe7zDz8f2ll4HIxvPz872o5A7ukkkpJLSw/LeYv9kMb1vab5n5Ss3/IE2c/W0qwd2gRuIYPgJp3W18YWCxTYtRb8exsnB0VTqBS/5pqKtsfRnGe4ayii+Hj3xF0gHDVFOSx9lgXdhn0kNdvwrpi2chrGo1s7fnvsSE02FClfQLTXxaoyyCYZTxEhchzurwPWYvi8z5SxglEG4p2f7eoPa6arBZYHX9RXEXsfrUyDaNsNnmXcikFWLmfDPU124H+92YfQb6ar8RpMTDFPLqkkQ/qRu08O+0cyCfU5B5qxbJQ9WMeE9TzMyx3md5QXKczZ/vrw+e8h0ndk6kGxrJ3Cc4+oaldFvwubu8l4cQMwXt2kP18KFEwJOfWxMccFFtdtmO8k56lXG1jTLqYbU8GC60qxrkIuvFFjvhaRS1a8arioAHF+hQNs/gu6UYTWLVpJTsCNjeFAUYkjYTo41hlgkKR1uQdkDLeGeyQDOCVgPoq5YJvRuANz+xtn3Z3Bazou9xZ+vSmBuZrweZCOpy3+tahMgGCtkD4bl1PwOh8mp2TRnLMFyyl+2zMHAqmeLJcilPG9TEtnSLP6fhl8K6ITBjC8wWKjlFMEeFF/lGyBlwwMQjO5SuPzFOiTbIOn5iXqcCB/pVxG+iT6TD71Ou1Cu8epvU3sdw6iNo6S1aRdb3dhdKzyP5CFMppsLwt2YRqfaVP3kz/kz3t05w3nMicOEiWsd566kLgiAhQ/IMoYr5vuqQyuwTidR8zKaB45nMOdTtcuK3CogyRd5zIDmvZl3ca6J0mAuUwH96mWPErm91vLU3T7EVfmsinGcxccNFmTvDB3gKvvfDei0XK3udtNFmtTMFQtR3GFIf4y+TTYy5Ang7Is22bhSiHRawJqyVtlnBMjfYcXvE6DEq8aQLg3WviHVIbqmP2G1iHwIZ8bdjLnbg0mRdfvfJfp86HHUyRaxhLhNEA/qwV+AyFbwhbJVGGFnCS4UiqH7vlxO6ApVF6q/3mtxDr1j1R6KhkWZpPoV3Y6/olClP8ETDbMZVQ8wakI7PP4NibmdTuYVzi+3ux8bBgCC7uuZZO2pjjTNL0VwknnViCD13WsdHtIdADhLrOeMjj8o0psrUW/0+6mnHUvQhlXVCxdi3KWi/KDwz9OH7jzjUBrqsCDBtTVCgLqLck5MW2WxrHZ7cMpiyxQLOt73qlj6lnmGwguZkoBXmyKZMcV2v1vEqpJ9FZ28nEAmU3u06qOZ0Scq0JRSl+yLwj1FIzcBz5MHX2DzGIzFpCz6bAq7SW7g9VKbq9eu/VL2E7qUpvpyqr7H1CLOPFPNApzjCVsX4I2cXV23HpgnIrkwppJfeR3oshBBs02KzVPDTKkAECAOoPUe6I6dhNSYToX1axcrgLDSjbTfMbzCCMSwXLqp6mi/VTvmnWpT/WWtxvXZigpQvl0O75PK/0+lFOg65NVfali1I+GfzeKmHz+e+IjnqKATOvh/5X0+iC9C+njRcY0kmzSsCiRfvsAKGIY6odkBRXSwFUYxwSMTqAg1cn/gmJQ9WfbXayGK6YzFUTec40PZi1wla5501tfpZd07W+nr5Lap2l00rTyyQBHxIhLCE3vwxFJLuHEXkxPL5IiNezqnMcp8p7kiGPs8mxzoamU1rIQOTO1VlK4sWLPF1/tjH+aIn0xRoGYJGk9Wkgw4cFYlkamtyhN1Nax2vsAzThtgXbecrRxmD0pGKjOiFyMdZV60aKT0OITFHU1YD9yOhbG85iBWRghJHBY3PbrCE3f0oSwFIytZ2arDXHGsPLOaFupEQaBHl/ynVsu3YL6F3QBU06AtTX4yiT+ww55IotdMgSjS53ksh/Ahzs/bhMY8xhBGeWdJV09LmlEYWQAYHzXSEURj2Y+McwCtM5SzNr1r4yMYLmlbfW0LX66XRnw1RIroo8ipDsaASWHfAxXs+ovaiB1OZyi02a/10kJRwO4pDTbOFEfm4E/8JMJCH+0/3RwGEtK8vFU+PQ7dDY+I2IoPe4sTs6Z//xZxgK7Tmn2IR5uf8HUDULClvhJGF91E3iSZgo/EC28LXSQVmvFQVEMFMO5IaopCGzWVg8OX4tawz8obbm5jZKv1qhfUB12MH5RwVuy6UmHt/b4tIQIXIvEkl7LAsbmM8hJO3UVXMSA3KozFTmQRHQpFqbwXbuoM2xE+eiUHYnK5Ys3G1xJL4pcAf8yUlnfDMPQbiwK3C3+jvYfP23o5fbRzaVmeILj7Wl99xM/fPJx8jkvA/sTAjUgGHkFRAXgxnZsnE1aeKYkv/2+gT71HmBuBCr/AYbtfd7OPv1Nog8o6NtpeXhj0Us4gLcU/UCl4LBR1qiLKbYdCHZugMFb0HZylzFHPpcjuCvJvPMa4H/cAmFdfWHiOve2iZNPA7qnlYjKggVIDoPILv8teSh83Ky0XuGpuqZ7s5tHAK+SFRFymS7DxQ3a2T7UKeCjdGA8jSsH3DG266EKveFtmO62yw5jNf+yypCzD2ig3fDtLtskoJD/Upu6rz0JqBGLrOu/NXF5mPUJJbYR0Ps0OmxQH8P5Eke5xqCNXh5yz2504Q6qrp/hqIgLyfNyCfKqBjy9MwzYHSMhZYFVZvB4UhNUr18VB4zR9JwmLLK9zQjLCeZo5AqEcWU6TzgsKPJYyLJUwdS8x9a9sFvZ1/bZfTioD1ZMeDz0Uffti9sxgFKGHQB1lCTVx90DwJ47ZUNKscCKMNj1geFujZe8neL86yl7MXEWFgO0W1tNli1SAusAVdiiru9dyZe7LP6y/kor29Tn/jHCC3vHvyNKeiEh7XN9C7xyOx6yGSkx4ecZJkC5dH+7zzgtmrZ6CsIqe82BsLgfFO4Xw+Lr3s92M6NCCjbQlGxYOnLL0syZJVmPShtQl2xq7yU/0Q5Tc8lWSJwOhW1hLJzUs94LKSu8pNKf3TmHE3vrB9rXI6yxAhiJrjVRtaXhMvocLs/EYISgg96HKeWs+1gsYJy3tW9c8USpiOalmswArdUMUrvCf54mAOKUewhDD9Uamp72M9bqnca2K6Kj+Be0ThSIFY2m79r/S7RD7Rtnyh365FUNvBgJN//BICKB0eXHif+7LIRomTo6oGRbMFESTb1MbCKdEkhLrSWEpK1IjfuAEU8mrBWaKHJSbpTOhC8/8c+oWFEvIMtmsFbG9MZklKRfs1rFKnnGJJBt1hDQYqhAXKsOQaHe/7vt40sCO4gN6fq2rIRceUay1JFTm092Iv8HeDwckg/AwHSd33ve7Lq3joyiPAH4gqs7qDsYXfwcGr6Wl7hnS18vWT2vbsPUWeRUIHhcdrNSqDKLbWq34EkB9M+c0xAyG0SAruUF0Yl81FsWLj87r9fg8Kd9JrbNIFccFOVn1i9dKZpjE9rZA+YbZMFDjkyLoHJlP/ASU/BK4g3RSBpj+Q16mH++R/1oTJsg7hyJLcJxxF8i47TCe3RIvx/o4us+vJCdmAifLV4ziNLdn3DsrVKOmDKPLlg0etElepBEG3zIhrbbbuuWTMfJjuDk4Xart6hbwgXoqexMxPFQs84ZCO95EuOXbg9f5ZAYRaHpL6rkgGcn1ywIFRgJcVTUAyd7Gb/9Af+6ZlP0pEnhSMi1CGrrTIMUruDpe2/oqbSX5ALjOenUnhq5r+OELnvgO4qDnujxvrHivJoiMxSjMV7jE5GV/2EpkNLLVRwrbO64K9ZtietmGMtID66JQLOq+h/AnhG1skNXxgI2lQUhOSF8D67PXv5IET5J7JPNiiPYwqyeMrKP6bLNHq5cCFwlXJZG6Ql/6SVE8M5hPo40hpAzDrUscAMfMT0YH5bb2WZmFUPI2cX3KTrCmii4Pear5Tr5CToi6B4oQX7b1hI+i0VertBtMkECLWnpCXTCrm1qUgwn1n3LAgJ1g0jWOtr7k9hvbBtjq8CMAXvYABz3mayszTt9qHwbWyuO4zXrH/bB1uRyXwg6pFe0zNuYoHouGtHu7cP1Nz2KkcNfMfh0QobHjgQQQFwS5Zpc8vgdYI/Tvf89uBHOnHEnjDKvW+zO/A7cvQGRYdAvorouV3gobx7SUiWGsElw0NyZWFsKoVRHwH36MwsLavbrL6fFW7SRDEwbGLP18e2p3drp7hqIeg3C3CSE4EDBobZpZqcPqpS7zwazfwPjtXWh98oqo50G6n6ip8Y0uHj4OHuHhRS6yTjG91qQOAx1+AcTqXLHvCtBQLvjcLeK17VDZKQhvF5lpMstNzgvnUOwc7usKz7KPfh4iESWSaZMQPG7M0KHbBCKPbxFCo61VA+gTe1B8N4OCino+cBPEjLg0Do5cM9/JEONq+lozLS0TYrlxfwSF2M38EfpBylunK3XQZAZxp8NVD40Qmi29bM7sIuBOGpe6vFKjU0iYPaYVJxo/8IMUDXSTMvXdRIU6K+CntRCLK2DFeGoEf1mpayXONCZ9wvngbFvlJtkqGJCEbaxuemUA3qXER9iYVSQEaOyKFl2FqYehhKclUkAtw6kN88h6xShjaz1uDIZ0qqqFq8owOZqiQ7GMSfPPwFIzH8xbv517jM0YT7pqTCvhMeSHzN9o5mNbU8o8VDtm7KaX0JXHHQD88wwvth1F0Cet0YIQaj7BJm0CE1ICGgy6s2xvFzdn7zS3srCgguEuASwsjEGCjPnyrrqrATs+xpYflxxLS414RCBdOfos3puao4Ijs1fhg0S3mpb8626b1zS5iADtpVZAGpDTGsuLSRnJKvipj1Lu52Cp8KMKyTBtFzuI7iw50av5W2gCboow9d5v4TDvtjZtyvm1ZpxeqG/vYzbYlBTqcZluSy1XamgjDG8AIJR8OtF/B+N5xzspzXHI+m1f1ZC2s6BPKXS9F6/w8tGVL4KW5FNc56ZmQPUqKT7LoWQWRqHMG2pPU4mBdcD3qHJWqm5DhI4I7UFLHlMuhdZQrA/EXpr+6uLWdAig/d/MFBUBL8I/eeWEqnZCzLKg3aaDC9agrQquieH/oD+aQxyKhKxriaBHbsYTOYiSgDQZ6rIbQBTEe3kiX/Yxzv/qBbpT5bc9jPyEBrzGQtaIz7kpvXwCQkxmT5d3csaX8DcM1EqRfjvddIposlWA+3+sy5H/h/7nSABYxCs951tnD19ispmYlBOjA4enAY2lFBdrs9srhOb9qxBajYpxWmndNwglN6fJO96l/iYxMkzFLAC3wtNgQQHwYELFGlQTyxAkbWj1G9bpM1zGxx2kyzwNe4FbDAxvVgmWQpbLmnEgAbPGgdhJGif5ud+V9LOCGYH6v4gzGZgVKzgVobcNT98cdDdjchCRYpIgtwZyTS+0osLIvIe/Zu0sqKkAHDtKLKGfdm/NTdO/P5mBXCSaO8rd+rFJFGqZv12rCBoTWr2sPItdfsD7jIDQ7b9mhPz/59T3fysNhXmY+v4r6gR+DAFnQPiUI/rdhU8pPXAs8naiUDpHCWYc6iJpE38jgzMdyZJdQnJX8HC3wbSR7iowQX+9gt/RL3kAylnG9Al3YUOoZ9GcgkXrgHDYQrcVhUtWGmWTNel0ychbjz9sTQcYOJRN16n+8nlj81KybCubkaKb5bCqpOmmRcg==",
+                "tokens": 1088
+              }
+            }
+          ],
+          "modelMessageId": "a14a7338-d6d2-4043-b610-67c6c01ed4e8",
+          "responseId": "76d4ca6c-4841-4b7b-a162-8d83895e1320",
+          "sessionId": "dbee8d63-4300-4bbc-a821-bcafac39d660",
+          "agentId": "github.copilot.default"
+        },
+        "details": "GPT-5 mini • 0x"
+      },
+      "responseMarkdownInfo": [
+        {
+          "suggestionId": "sgt-75832b47-ab86-4a51-a7c0-f06b4edc1e94"
+        },
+        {
+          "suggestionId": "sgt-26ca3452-fad8-4cf7-b7db-ff32fa6a25c3"
+        }
+      ],
+      "followups": [],
+      "isCanceled": false,
+      "agent": {
+        "extensionId": {
+          "value": "GitHub.copilot-chat",
+          "_lower": "github.copilot-chat"
+        },
+        "extensionVersion": "0.31.5",
+        "publisherDisplayName": "GitHub",
+        "extensionPublisherId": "GitHub",
+        "extensionDisplayName": "GitHub Copilot Chat",
+        "id": "github.copilot.default",
+        "description": "Ask or edit in context",
+        "metadata": {
+          "themeIcon": {
+            "id": "copilot"
+          },
+          "hasFollowups": false,
+          "helpTextPrefix": "You can ask me general programming questions, or chat with the following participants which have specialized expertise and can perform actions:",
+          "helpTextPostfix": {
+            "value": "To have a great conversation, ask me questions as if I was a real programmer:\n\n* **Show me the code** you want to talk about by having the files open and selecting the most important lines.\n* **Make refinements** by asking me follow-up questions, adding clarifications, providing errors, etc.\n* **Review my suggested code** and tell me about issues or improvements, so I can iterate on it.\n\nYou can also ask me questions about your editor selection by [starting an inline chat session](command:inlineChat.start).\n\nLearn more about [GitHub Copilot](https://docs.github.com/copilot/using-github-copilot/getting-started-with-github-copilot?tool=vscode&utm_source=editor&utm_medium=chat-panel&utm_campaign=2024q3-em-MSFT-getstarted) in [Visual Studio Code](https://code.visualstudio.com/docs/copilot/overview). Or explore the [Copilot walkthrough](command:github.copilot.open.walkthrough).",
+            "isTrusted": {
+              "enabledCommands": [
+                "inlineChat.start",
+                "github.copilot.open.walkthrough"
+              ]
+            },
+            "supportThemeIcons": false,
+            "supportHtml": false,
+            "uris": {
+              "command:inlineChat.start": {
+                "$mid": 1,
+                "path": "inlineChat.start",
+                "scheme": "command"
+              },
+              "https://docs.github.com/copilot/using-github-copilot/getting-started-with-github-copilot?tool=vscode&utm_source=editor&utm_medium=chat-panel&utm_campaign=2024q3-em-MSFT-getstarted": {
+                "$mid": 1,
+                "path": "/copilot/using-github-copilot/getting-started-with-github-copilot",
+                "scheme": "https",
+                "authority": "docs.github.com",
+                "query": "tool=vscode&utm_source=editor&utm_medium=chat-panel&utm_campaign=2024q3-em-MSFT-getstarted"
+              },
+              "https://code.visualstudio.com/docs/copilot/overview": {
+                "$mid": 1,
+                "path": "/docs/copilot/overview",
+                "scheme": "https",
+                "authority": "code.visualstudio.com"
+              },
+              "command:github.copilot.open.walkthrough": {
+                "$mid": 1,
+                "path": "github.copilot.open.walkthrough",
+                "scheme": "command"
+              }
+            }
+          },
+          "supportIssueReporting": false,
+          "requester": {
+            "name": "shraw06",
+            "icon": {
+              "$mid": 1,
+              "path": "/u/194143757",
+              "scheme": "https",
+              "authority": "avatars.githubusercontent.com",
+              "query": "v=4"
+            }
+          }
+        },
+        "name": "GitHubCopilot",
+        "fullName": "GitHub Copilot",
+        "isDefault": true,
+        "locations": [
+          "panel"
+        ],
+        "modes": [
+          "ask"
+        ],
+        "slashCommands": [],
+        "disambiguation": [
+          {
+            "category": "generate_code_sample",
+            "description": "The user wants to generate code snippets without referencing the contents of the current workspace. This category does not include generating entire projects.",
+            "examples": [
+              "Write an example of computing a SHA256 hash."
+            ]
+          },
+          {
+            "category": "add_feature_to_file",
+            "description": "The user wants to change code in a file that is provided in their request, without referencing the contents of the current workspace. This category does not include generating entire projects.",
+            "examples": [
+              "Add a refresh button to the table widget."
+            ]
+          },
+          {
+            "category": "question_about_specific_files",
+            "description": "The user has a question about a specific file or code snippet that they have provided as part of their query, and the question does not require additional workspace context to answer.",
+            "examples": [
+              "What does this file do?"
+            ]
+          }
+        ]
+      },
+      "contentReferences": [
+        {
+          "kind": "reference",
+          "reference": {
+            "$mid": 1,
+            "fsPath": "/home/shrawani/course-project-shellshocked/client.c",
+            "external": "file:///home/shrawani/course-project-shellshocked/client.c",
+            "path": "/home/shrawani/course-project-shellshocked/client.c",
+            "scheme": "file"
+          }
+        }
+      ],
+      "codeCitations": [],
+      "timestamp": 1762627531367,
+      "modelId": "copilot/gpt-5-mini"
+    },
+    {
+      "requestId": "request_bfa8259f-67a7-4c77-8650-0d4b6e12ccd0",
+      "message": {
+        "text": "The client program still doesn't end after making these edits, how to make this happen",
+        "parts": [
+          {
+            "range": {
+              "start": 0,
+              "endExclusive": 86
+            },
+            "editorRange": {
+              "startLineNumber": 1,
+              "startColumn": 1,
+              "endLineNumber": 1,
+              "endColumn": 87
+            },
+            "text": "The client program still doesn't end after making these edits, how to make this happen",
+            "kind": "text"
+          }
+        ]
+      },
+      "variableData": {
+        "variables": [
+          {
+            "kind": "file",
+            "id": "vscode.implicit.file",
+            "name": "file:client.c",
+            "value": {
+              "$mid": 1,
+              "fsPath": "/home/shrawani/course-project-shellshocked/client.c",
+              "external": "file:///home/shrawani/course-project-shellshocked/client.c",
+              "path": "/home/shrawani/course-project-shellshocked/client.c",
+              "scheme": "file"
+            },
+            "modelDescription": "User's active file"
+          }
+        ]
+      },
+      "response": [
+        {
+          "kind": "thinking",
+          "value": "**Crafting code modifications**\n\nI need to supply a code block that includes the filepath and both the existing and changed code as per the developer's instructions. First, I’ll modify the `sigint_handler` function in `client.c`:\n\n```c\nvoid sigint_handler(int signo) {\n    if (sig_pipe[1] != -1) {\n        const char b = 'I';\n        ssize_t r = write(sig_pipe[1], &b, 1);\n        (void)r;\n    }\n    sigint_received = 1;\n}\n```\n\nIn the write handling loop, I'll implement checks around `fgets` to handle interruptions due to signals. Additionally, I'll ensure that `current_ss_sock` is properly set with `ss_sock`.",
+          "id": "jfJXIpDDcZ8Hh440a+VOAGtu7Jp4466JByRMZIgO9Og2WYyxaZ5UGNjayA3ig+FzlDcQhu4UTNeDYnj+BAHSy+xRM52FXPUj88euI2dsoNDQgLn37wzDwnjMTz9QmZyRhMCOvfCNT26rQ7NlHY0wBnWQhqOC1PvxtTrdmar31+H/Z4uYsaFV+SuO775+HS9CrdzEKwamWdJP17ZMO4buMCYpE0cLPBHRuFm1ci1ttwz34h2496D5vQqclOeb8Ufy7CANZo5K9ce09qde4XVvoypH9/PVyUV+wr8whXuuvXeIFGWyuCfMzOTPKxti5wh84bbszkM4n/nA4WjR4rfOmrVO2i7Zybqgqdql1kmaT/LWfMJ5Rc+Iv1yJIknzytINADfCF2A="
+        },
+        {
+          "kind": "thinking",
+          "value": "",
+          "id": "adbKDquA/VsHyu1aIS5WAm2o/ViVoGgFBrIKD/H7sbYeU3yLWhF9OTvCqpsdkgJHL1Bq0OlVqtqFDLai3RXdmAmOKoYYvsefxt1cL7APi9Cd9aRuAvash43oGIZicd6bSOHAi4YVXvanNEvEnO77r2GpxRpXaogqIXdaEa3cBOyv+MKNHBL8fzNdPmqPyiWXKie51t5612pw1up1++lj3koA8VLQahQuCGHlGk3VHpQweAEZGm4b3QkfUWy+yWKgdTi4KiiENjJcbuz8nFRvQX6bdKZa/8tPIvhXso65MyvNeE2dQfhmXTy7SLeVhxcELuHFh4ZjgzpBlT3QOZRklZ+yGBhZcZFdhp1IsCsw+O33GkKDwwXRgSoZoFfd3Uk143tRTWo="
+        },
+        {
+          "kind": "thinking",
+          "value": "**Adding code modifications**\n\nI noticed that the `current_ss_sock` variable is declared as `volatile sig_atomic_t`, and then set to `current_ss_sock = ss_sock`. That could potentially cause issues because `sig_atomic_t` might not safely hold file descriptors across types, but it's manageable for now. \n\nI need to include these modifications in the code block with a brief explanation and filepath comment. I’ll format it like this:\n\n```\n# Filepath: client.c\nvoid sigint_handler(int signo) {\n    ...\n    current_ss_sock = ss_sock; // Ensure file descriptor is handled properly\n}\n```\n\nI'll keep it impersonal and to the point.",
+          "id": "K52A9s8ly63bTb78o3+bn77hpSvNAIExiqTmwJB9BBj9rfsmE42s5CA9Rk6sfcMsegSmjdI3CT6hOlLjKOduuINYk+4a9ub28LarrbyTbvgCbTsflf540qHVec9VK8k9qkwne4IU1ks1cygwNPRnt+Ammq/mehgwH/XCT/yB+S2BHI6SbH7Owy375ySy1I7cFYMvdO5Wrnp1hdnMM6DGegf6BuRWddOVvA8D6hdE7rGOMXIy8IrRzIq2uG1B4r/O2AhB6jFErr1NLm/PrsdOxN+ZTKOpWwXZnlPtJZOIJH/iBTNIyy4FAhzTZFXQCqaqHZzbIj99DHkNKLHgUUN9Zud3wk/i81BYF1oCQzdYDjB6izxnuAAJziKI2q7P5Pa8hj2PTPY="
+        },
+        {
+          "kind": "thinking",
+          "value": "",
+          "id": "GGiBZoDC2mSic3HxGJGEo/4Lvz7bi76rxE4GBLNWwi+U5QIzDRYIqODdABRhDf4bnBKTAc+SXAEBhi7s31FIXL76Y/0TFlkAF1JlgRPi0zhzlo99ol0HpZmtYAmH/dBn8wt6mz8YYDThQk5xGbsUh4cIKykq4Wfeg/rVNaMqdwPHf9d/VWDOMcCbX2+q5LfpEZnOK5JHL+C9tL3Jpg9Gk77U20cBotRCsSv6qRDqn+mR0Cb7S7w9fZYHVVbxp4ZEf/o8Hw72sCq7fQAZ1F/kLVVDlZcPsqGglGf9djWrDIEB/VvdB+dnFqXEx3jjSJ7Atmq8wRsCjzh/tF/gVJqNPN+IY3wWwY8vg4Yr+KIWlhLXepB3ozJ6UATyqwXJFTbW5gYBde4="
+        },
+        {
+          "value": "GitHub Copilot\n\nYou need two fixes:\n\n1) stop assigning -1 in the SIGINT handler (use !=) so the self‑pipe stays usable, and\n2) handle SIGINT while the client is blocked inside the WRITE input loop — check the sigint flag after fgets and call perform_pending_unlock() then exit.\n\nApply this patch to client.c:\n\n````c\n",
+          "supportThemeIcons": false,
+          "supportHtml": false,
+          "baseUri": {
+            "$mid": 1,
+            "path": "/home/shrawani/course-project-shellshocked/",
+            "scheme": "file"
+          }
+        },
+        {
+          "kind": "codeblockUri",
+          "uri": {
+            "$mid": 1,
+            "fsPath": "/home/shrawani/course-project-shellshocked/client.c",
+            "external": "file:///home/shrawani/course-project-shellshocked/client.c",
+            "path": "/home/shrawani/course-project-shellshocked/client.c",
+            "scheme": "file"
+          }
+        },
+        {
+          "value": "// ...existing code...\nvoid sigint_handler(int signo) {\n\n-    if(sig_pipe[1] = -1) {\n-        const char b = 'I';\n-        ssize_t r = write(sig_pipe[1], &b, 1);\n-        (void)r;\n-    }\n+    /* notify main loop via self-pipe (async-signal-safe) if write end valid */\n+    if (sig_pipe[1] != -1) {\n+        const char b = 'I';\n+        ssize_t r = write(sig_pipe[1], &b, 1);\n+        (void)r;\n+    }\n \n     sigint_received = 1;\n     // calling send/recv/exit in signal handler is unsafe, so using a pipe to notify main loop - S\n// ...existing code...\n````\n\n````c\n",
+          "supportThemeIcons": false,
+          "supportHtml": false,
+          "baseUri": {
+            "$mid": 1,
+            "path": "/home/shrawani/course-project-shellshocked/",
+            "scheme": "file"
+          }
+        },
+        {
+          "kind": "codeblockUri",
+          "uri": {
+            "$mid": 1,
+            "fsPath": "/home/shrawani/course-project-shellshocked/client.c",
+            "external": "file:///home/shrawani/course-project-shellshocked/client.c",
+            "path": "/home/shrawani/course-project-shellshocked/client.c",
+            "scheme": "file"
+          }
+        },
+        {
+          "value": "// ...existing code inside handle_write()...\n    while (1) {\n        printf(\"Client: \");\n        if (!fgets(line, sizeof(line), stdin)) {\n-            break;\n+            /* if fgets was interrupted by SIGINT, perform unlock and exit */\n+            if (sigint_received) {\n+                perform_pending_unlock();\n+                printf(\"\\nInterrupted; exiting client.\\n\");\n+                exit(0);\n+            }\n+            break;\n        }\n+        /* if SIGINT arrived while blocked in fgets, handle it now */\n+        if (sigint_received) {\n+            perform_pending_unlock();\n+            printf(\"\\nInterrupted; exiting client.\\n\");\n+            exit(0);\n+        }\n        \n        trim_whitespace(line);\n        \n        if (strcmp(line, \"ETIRW\") == 0) {\n            break;\n        }\n        \n// ...existing code...\n````\n\nAfter these changes:\n- SIGINT writes a byte to the pipe correctly.\n- If SIGINT happens while in the WRITE loop (where the client uses blocking fgets), the loop notices sigint_received, sends the unlock from the main context, and then exits the process.  \n- If SIGINT happens while in command_loop's select(), the pipe wakes select(), perform_pending_unlock() runs and the loop breaks as before.\n\nIf you prefer to return to the prompt instead of exiting, replace exit(0) with logic to close the ss socket, reset flags and return from handle_write().",
+          "supportThemeIcons": false,
+          "supportHtml": false,
+          "baseUri": {
+            "$mid": 1,
+            "path": "/home/shrawani/course-project-shellshocked/",
+            "scheme": "file"
+          }
+        }
+      ],
+      "responseId": "response_93b54dd6-38d8-4e2f-bef1-8afaf63dfeb2",
+      "result": {
+        "timings": {
+          "firstProgress": 24234,
+          "totalElapsed": 31094
+        },
+        "metadata": {
+          "codeBlocks": [
+            {
+              "code": "// ...existing code...\nvoid sigint_handler(int signo) {\n\n-    if(sig_pipe[1] = -1) {\n-        const char b = 'I';\n-        ssize_t r = write(sig_pipe[1], &b, 1);\n-        (void)r;\n-    }\n+    /* notify main loop via self-pipe (async-signal-safe) if write end valid */\n+    if (sig_pipe[1] != -1) {\n+        const char b = 'I';\n+        ssize_t r = write(sig_pipe[1], &b, 1);\n+        (void)r;\n+    }\n \n     sigint_received = 1;\n     // calling send/recv/exit in signal handler is unsafe, so using a pipe to notify main loop - S\n// ...existing code...\n",
+              "resource": {
+                "$mid": 1,
+                "path": "/home/shrawani/course-project-shellshocked/client.c",
+                "scheme": "file"
+              },
+              "language": "c",
+              "markdownBeforeBlock": "GitHub Copilot\n\nYou need two fixes:\n\n1) stop assigning -1 in the SIGINT handler (use !=) so the self‑pipe stays usable, and\n2) handle SIGINT while the client is blocked inside the WRITE input loop — check the sigint flag after fgets and call perform_pending_unlock() then exit.\n\nApply this patch to client.c:\n\n"
+            },
+            {
+              "code": "// ...existing code inside handle_write()...\n    while (1) {\n        printf(\"Client: \");\n        if (!fgets(line, sizeof(line), stdin)) {\n-            break;\n+            /* if fgets was interrupted by SIGINT, perform unlock and exit */\n+            if (sigint_received) {\n+                perform_pending_unlock();\n+                printf(\"\\nInterrupted; exiting client.\\n\");\n+                exit(0);\n+            }\n+            break;\n        }\n+        /* if SIGINT arrived while blocked in fgets, handle it now */\n+        if (sigint_received) {\n+            perform_pending_unlock();\n+            printf(\"\\nInterrupted; exiting client.\\n\");\n+            exit(0);\n+        }\n        \n        trim_whitespace(line);\n        \n        if (strcmp(line, \"ETIRW\") == 0) {\n            break;\n        }\n        \n// ...existing code...\n",
+              "resource": {
+                "$mid": 1,
+                "path": "/home/shrawani/course-project-shellshocked/client.c",
+                "scheme": "file"
+              },
+              "language": "c",
+              "markdownBeforeBlock": "\n"
+            }
+          ],
+          "toolCallRounds": [
+            {
+              "response": "GitHub Copilot\n\nYou need two fixes:\n\n1) stop assigning -1 in the SIGINT handler (use !=) so the self‑pipe stays usable, and\n2) handle SIGINT while the client is blocked inside the WRITE input loop — check the sigint flag after fgets and call perform_pending_unlock() then exit.\n\nApply this patch to client.c:\n\n````c\n// filepath: /home/shrawani/course-project-shellshocked/client.c\n// ...existing code...\nvoid sigint_handler(int signo) {\n\n-    if(sig_pipe[1] = -1) {\n-        const char b = 'I';\n-        ssize_t r = write(sig_pipe[1], &b, 1);\n-        (void)r;\n-    }\n+    /* notify main loop via self-pipe (async-signal-safe) if write end valid */\n+    if (sig_pipe[1] != -1) {\n+        const char b = 'I';\n+        ssize_t r = write(sig_pipe[1], &b, 1);\n+        (void)r;\n+    }\n \n     sigint_received = 1;\n     // calling send/recv/exit in signal handler is unsafe, so using a pipe to notify main loop - S\n// ...existing code...\n````\n\n````c\n// filepath: /home/shrawani/course-project-shellshocked/client.c\n// ...existing code inside handle_write()...\n    while (1) {\n        printf(\"Client: \");\n        if (!fgets(line, sizeof(line), stdin)) {\n-            break;\n+            /* if fgets was interrupted by SIGINT, perform unlock and exit */\n+            if (sigint_received) {\n+                perform_pending_unlock();\n+                printf(\"\\nInterrupted; exiting client.\\n\");\n+                exit(0);\n+            }\n+            break;\n        }\n+        /* if SIGINT arrived while blocked in fgets, handle it now */\n+        if (sigint_received) {\n+            perform_pending_unlock();\n+            printf(\"\\nInterrupted; exiting client.\\n\");\n+            exit(0);\n+        }\n        \n        trim_whitespace(line);\n        \n        if (strcmp(line, \"ETIRW\") == 0) {\n            break;\n        }\n        \n// ...existing code...\n````\n\nAfter these changes:\n- SIGINT writes a byte to the pipe correctly.\n- If SIGINT happens while in the WRITE loop (where the client uses blocking fgets), the loop notices sigint_received, sends the unlock from the main context, and then exits the process.  \n- If SIGINT happens while in command_loop's select(), the pipe wakes select(), perform_pending_unlock() runs and the loop breaks as before.\n\nIf you prefer to return to the prompt instead of exiting, replace exit(0) with logic to close the ss socket, reset flags and return from handle_write().",
+              "toolCalls": [],
+              "toolInputRetry": 0,
+              "id": "3329f47f-9902-4379-ac93-ece6646ac661",
+              "statefulMarker": "oqPvuIep1Ts9jv9g3ppUFseVHCPukhwJBsyBcmKFkjUN/LCEH882eNIBiCE6ToxRMLwBOGmLAh4DEG6XoNtV0JVaFo/OVP9IPAkqpTtvQ8CHGn1spzgNas7DpKrJ2FZVngeUKqEWjuISJApqLIA8W5Ft0U6HN3SHBn4usa63o/jNrLjtHnD/QfVUkQ/XEbp8L5pdCgmjxYXU1sUMcxx8/W7DdqTzvQPOZoNwztG4uCeFzZuQUJmRUOA+GK4fq2rrbzn9L2SqtmaEtsk29RN1bQlgcniQ5uGFdhfvEJtkC+kvj/Hf6lJmIZD54uNrmZ5y/xDTvoi2HXbFIVcoxPlYutb0x+nYPGcAm5JYj7Tw4bC4XdjWFDSwdskW0A5vEvl40cbmNZPG6A==",
+              "thinking": {
+                "id": "MmMQNVN9qO0yN4x+gFnL+MW2b2ey4U+uVrWBwLq1Klqr/d/R9tDW9Ob7sBNMJrU2QdOJfzrRa342ZCmPB0nHGmQpjg3c3W7L0hjH9eRV6ZNA2SJ1dHXKGUQXSe+ZR0ipF+PRDyogUmG2vpMHtA5u2qkNFUhkPMy71YClnm6KRNbm7y4CJXiF3XLq+TkGm/C1mALK+M5MVQKp+GnWIu0CLfQ15QHUZonqgBMC4ac8S4KMMtH3UpTsYEZDxPZakARvlj6CPu3tHWcwGStKaxKTE4Aeh7BD1ugXfaH0Za9JSCV6B9WVyWcDzqgTxpCEziXd86+FILoI60Q2WAa+3rqFU2fbC/76Itbwp47hm03RSxJipCGD2aw9SnZOn3E/B3ON1wQSBBI=",
+                "text": "**Crafting code modifications**\n\nI need to supply a code block that includes the filepath and both the existing and changed code as per the developer's instructions. First, I’ll modify the `sigint_handler` function in `client.c`:\n\n```c\nvoid sigint_handler(int signo) {\n    if (sig_pipe[1] != -1) {\n        const char b = 'I';\n        ssize_t r = write(sig_pipe[1], &b, 1);\n        (void)r;\n    }\n    sigint_received = 1;\n}\n```\n\nIn the write handling loop, I'll implement checks around `fgets` to handle interruptions due to signals. Additionally, I'll ensure that `current_ss_sock` is properly set with `ss_sock`.**Adding code modifications**\n\nI noticed that the `current_ss_sock` variable is declared as `volatile sig_atomic_t`, and then set to `current_ss_sock = ss_sock`. That could potentially cause issues because `sig_atomic_t` might not safely hold file descriptors across types, but it's manageable for now. \n\nI need to include these modifications in the code block with a brief explanation and filepath comment. I’ll format it like this:\n\n```\n# Filepath: client.c\nvoid sigint_handler(int signo) {\n    ...\n    current_ss_sock = ss_sock; // Ensure file descriptor is handled properly\n}\n```\n\nI'll keep it impersonal and to the point.",
+                "encrypted": "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",
+                "tokens": 1600
+              }
+            }
+          ],
+          "modelMessageId": "9723d030-2c97-4c39-8192-bbd0a01207f4",
+          "responseId": "709197ca-bc42-425f-8309-9eb41cd25e95",
+          "sessionId": "dbee8d63-4300-4bbc-a821-bcafac39d660",
+          "agentId": "github.copilot.default"
+        },
+        "details": "GPT-5 mini • 0x"
+      },
+      "responseMarkdownInfo": [
+        {
+          "suggestionId": "sgt-29c62ed4-bfc5-405e-ac76-d2a5a4d13a2a"
+        },
+        {
+          "suggestionId": "sgt-116bbfd9-f93a-4618-8204-00004f321a06"
+        }
+      ],
+      "followups": [],
+      "isCanceled": false,
+      "agent": {
+        "extensionId": {
+          "value": "GitHub.copilot-chat",
+          "_lower": "github.copilot-chat"
+        },
+        "extensionVersion": "0.31.5",
+        "publisherDisplayName": "GitHub",
+        "extensionPublisherId": "GitHub",
+        "extensionDisplayName": "GitHub Copilot Chat",
+        "id": "github.copilot.default",
+        "description": "Ask or edit in context",
+        "metadata": {
+          "themeIcon": {
+            "id": "copilot"
+          },
+          "hasFollowups": false,
+          "helpTextPrefix": "You can ask me general programming questions, or chat with the following participants which have specialized expertise and can perform actions:",
+          "helpTextPostfix": {
+            "value": "To have a great conversation, ask me questions as if I was a real programmer:\n\n* **Show me the code** you want to talk about by having the files open and selecting the most important lines.\n* **Make refinements** by asking me follow-up questions, adding clarifications, providing errors, etc.\n* **Review my suggested code** and tell me about issues or improvements, so I can iterate on it.\n\nYou can also ask me questions about your editor selection by [starting an inline chat session](command:inlineChat.start).\n\nLearn more about [GitHub Copilot](https://docs.github.com/copilot/using-github-copilot/getting-started-with-github-copilot?tool=vscode&utm_source=editor&utm_medium=chat-panel&utm_campaign=2024q3-em-MSFT-getstarted) in [Visual Studio Code](https://code.visualstudio.com/docs/copilot/overview). Or explore the [Copilot walkthrough](command:github.copilot.open.walkthrough).",
+            "isTrusted": {
+              "enabledCommands": [
+                "inlineChat.start",
+                "github.copilot.open.walkthrough"
+              ]
+            },
+            "supportThemeIcons": false,
+            "supportHtml": false,
+            "uris": {
+              "command:inlineChat.start": {
+                "$mid": 1,
+                "path": "inlineChat.start",
+                "scheme": "command"
+              },
+              "https://docs.github.com/copilot/using-github-copilot/getting-started-with-github-copilot?tool=vscode&utm_source=editor&utm_medium=chat-panel&utm_campaign=2024q3-em-MSFT-getstarted": {
+                "$mid": 1,
+                "path": "/copilot/using-github-copilot/getting-started-with-github-copilot",
+                "scheme": "https",
+                "authority": "docs.github.com",
+                "query": "tool=vscode&utm_source=editor&utm_medium=chat-panel&utm_campaign=2024q3-em-MSFT-getstarted"
+              },
+              "https://code.visualstudio.com/docs/copilot/overview": {
+                "$mid": 1,
+                "path": "/docs/copilot/overview",
+                "scheme": "https",
+                "authority": "code.visualstudio.com"
+              },
+              "command:github.copilot.open.walkthrough": {
+                "$mid": 1,
+                "path": "github.copilot.open.walkthrough",
+                "scheme": "command"
+              }
+            }
+          },
+          "supportIssueReporting": false,
+          "requester": {
+            "name": "shraw06",
+            "icon": {
+              "$mid": 1,
+              "path": "/u/194143757",
+              "scheme": "https",
+              "authority": "avatars.githubusercontent.com",
+              "query": "v=4"
+            }
+          }
+        },
+        "name": "GitHubCopilot",
+        "fullName": "GitHub Copilot",
+        "isDefault": true,
+        "locations": [
+          "panel"
+        ],
+        "modes": [
+          "ask"
+        ],
+        "slashCommands": [],
+        "disambiguation": [
+          {
+            "category": "generate_code_sample",
+            "description": "The user wants to generate code snippets without referencing the contents of the current workspace. This category does not include generating entire projects.",
+            "examples": [
+              "Write an example of computing a SHA256 hash."
+            ]
+          },
+          {
+            "category": "add_feature_to_file",
+            "description": "The user wants to change code in a file that is provided in their request, without referencing the contents of the current workspace. This category does not include generating entire projects.",
+            "examples": [
+              "Add a refresh button to the table widget."
+            ]
+          },
+          {
+            "category": "question_about_specific_files",
+            "description": "The user has a question about a specific file or code snippet that they have provided as part of their query, and the question does not require additional workspace context to answer.",
+            "examples": [
+              "What does this file do?"
+            ]
+          }
+        ]
+      },
+      "contentReferences": [
+        {
+          "kind": "reference",
+          "reference": {
+            "$mid": 1,
+            "fsPath": "/home/shrawani/course-project-shellshocked/client.c",
+            "external": "file:///home/shrawani/course-project-shellshocked/client.c",
+            "path": "/home/shrawani/course-project-shellshocked/client.c",
+            "scheme": "file"
+          }
+        }
+      ],
+      "codeCitations": [],
+      "timestamp": 1762627900443,
+      "modelId": "copilot/gpt-5-mini"
+    }
+  ]
+}
