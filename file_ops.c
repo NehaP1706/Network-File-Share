@@ -620,20 +620,21 @@ int insert_word_in_sentence(FileContent *fc, int sent_idx, int word_idx, const c
     
     // Insert parts
     Sentence *cur_sent = &fc->sentences[sent_idx];
+    int cur_sent_idx = sent_idx;
     int in_new_sentence = 0;
     
     for (int i = 0; i < part_count; i++) {
-        // Expand words array if needed
-        if (cur_sent->word_count >= cur_sent->capacity) {
-            cur_sent->capacity *= 2;
-            cur_sent->words = realloc(cur_sent->words, sizeof(char*) * cur_sent->capacity);
-        }
-        
         // Check if this is the last delimiter that should split sentences
         int should_split = (i == last_delimiter_idx && last_delimiter_idx < part_count - 1);
         
         if (!in_new_sentence) {
-            // Still in original sentence - shift words to make room
+            // Still in original sentence - expand if needed
+            if (cur_sent->word_count >= cur_sent->capacity) {
+                cur_sent->capacity *= 2;
+                cur_sent->words = realloc(cur_sent->words, sizeof(char*) * cur_sent->capacity);
+            }
+            
+            // Shift words to make room
             for (int j = cur_sent->word_count; j > actual_idx; j--) {
                 cur_sent->words[j] = cur_sent->words[j - 1];
             }
@@ -645,27 +646,42 @@ int insert_word_in_sentence(FileContent *fc, int sent_idx, int word_idx, const c
             
             if (should_split) {
                 // Move remaining words to new sentence
-                Sentence *next_sent = &fc->sentences[sent_idx + 1];
+                cur_sent_idx++;
+                Sentence *next_sent = &fc->sentences[cur_sent_idx];
                 int words_to_move = cur_sent->word_count - actual_idx;
                 
+                // Ensure capacity in next sentence
+                while (next_sent->capacity < words_to_move + (part_count - i - 1)) {
+                    next_sent->capacity *= 2;
+                    next_sent->words = realloc(next_sent->words, sizeof(char*) * next_sent->capacity);
+                }
+                
                 for (int j = 0; j < words_to_move; j++) {
-                    if (next_sent->word_count >= next_sent->capacity) {
-                        next_sent->capacity *= 2;
-                        next_sent->words = realloc(next_sent->words, sizeof(char*) * next_sent->capacity);
-                    }
                     next_sent->words[next_sent->word_count++] = cur_sent->words[actual_idx + j];
                 }
                 cur_sent->word_count = actual_idx;
                 
                 // Switch to new sentence
                 cur_sent = next_sent;
-                actual_idx = cur_sent->word_count;
+                actual_idx = 0;  // FIX: Start at beginning of new sentence content
                 in_new_sentence = 1;
             }
         } else {
-            // In new sentence - just append
-            cur_sent->words[cur_sent->word_count++] = strdup(parts[i]);
-            actual_idx = cur_sent->word_count;
+            // In new sentence - expand if needed before inserting
+            if (cur_sent->word_count >= cur_sent->capacity) {
+                cur_sent->capacity *= 2;
+                cur_sent->words = realloc(cur_sent->words, sizeof(char*) * cur_sent->capacity);
+            }
+            
+            // FIX: Insert at actual_idx, not append
+            // Shift words after actual_idx to make room
+            for (int j = cur_sent->word_count; j > actual_idx; j--) {
+                cur_sent->words[j] = cur_sent->words[j - 1];
+            }
+            
+            cur_sent->words[actual_idx] = strdup(parts[i]);
+            cur_sent->word_count++;
+            actual_idx++;  // Move forward for next insertion
         }
         
         free(parts[i]);
