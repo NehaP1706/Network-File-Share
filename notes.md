@@ -13,8 +13,8 @@ This document outlines the key design choices, inherent limitations, and operati
 ## 2. Caveats and User Experience Notes
 
 - **Single Session Per User:** The system enforces a strict one-session-per-username policy. A user cannot have multiple concurrent client sessions with the same username.
-- **Word Definition and Counting:** The system's tokenizer treats whitespace (spaces, newlines) and sentence delimiters (`.`, `!`, `?`) as separate "words". This affects word counts in file information and the indexing for write operations, which may be unintuitive.
-The fact that there should be no space between the last word of a sentence and its adjacent right delimiter should not have any space in between them unless explicitly states by the user, is almost taken care of.
+- **Word Definition and Counting:** The system's tokenizer treats sentence delimiters (`.`, `!`, `?`) as separate "words" inside a one WRITE command. This affects word counts in file information and the indexing for write operations, which may be unintuitive.
+The fact that there should be no space between the last word of a sentence and its adjacent right delimiter unless explicitly states by the user, is almost taken care of.
 - **Write Operation Indexing:** When writing to a file, the word index is 1-based and specifies the position *before* which the new content is inserted. For example, in a sentence "word1 word2 word3", a command to insert "word4" at index `2` will result in "word1 word4 word2 word3".
 - **Folder Path Syntax:** When referencing a folder in any command (e.g., `MOVE`, `VIEWFOLDER`), the folder name must be prefixed with a forward slash (e.g., `/myfolder`).
 - **Storage Server Initialization:** Each Storage Server must be launched with a unique integer as a command-line argument (e.g., `./ss 1`). This integer is used as the name for its root storage directory.
@@ -34,6 +34,7 @@ The fact that there should be no space between the last word of a sentence and i
         - The INFO command doesn't consider delimiters as words.
     - **Input Format Assumptions:** The system assumes that words and delimiters in any file content are separated by at least one space. The only exception is the final word of a sentence, which is immediately followed by its delimiter without a space (e.g., `"Hello world."`). This structure is critical for correct parsing.
 - **User Management:** The system assumes that usernames are unique. There is no explicit user registration system; a user is considered "registered" the first time they connect with a new username.
+- **Indexing:** Sentences are 0-indexed and words are 1-indexed.
 
 ## 4. Declarations and Design Choices
 
@@ -81,6 +82,7 @@ The Name Server will listen on:
 - Port 8080: Storage Server connections
 - Port 8081: Client connections
 - Port 8082: Heartbeat monitoring
+
 
 #### 2. Start Storage Servers
 Each Storage Server requires a unique integer identifier as a directory name:
