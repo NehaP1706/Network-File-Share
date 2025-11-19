@@ -14,6 +14,7 @@ This document outlines the key design choices, inherent limitations, and operati
 
 - **Single Session Per User:** The system enforces a strict one-session-per-username policy. A user cannot have multiple concurrent client sessions with the same username.
 - **Word Definition and Counting:** The system's tokenizer treats whitespace (spaces, newlines) and sentence delimiters (`.`, `!`, `?`) as separate "words". This affects word counts in file information and the indexing for write operations, which may be unintuitive.
+The fact that there should be no space between the last word of a sentence and its adjacent right delimiter should not have any space in between them unless explicitly states by the user, is almost taken care of.
 - **Write Operation Indexing:** When writing to a file, the word index is 1-based and specifies the position *before* which the new content is inserted. For example, in a sentence "word1 word2 word3", a command to insert "word4" at index `2` will result in "word1 word4 word2 word3".
 - **Folder Path Syntax:** When referencing a folder in any command (e.g., `MOVE`, `VIEWFOLDER`), the folder name must be prefixed with a forward slash (e.g., `/myfolder`).
 - **Storage Server Initialization:** Each Storage Server must be launched with a unique integer as a command-line argument (e.g., `./ss 1`). This integer is used as the name for its root storage directory.
@@ -25,8 +26,13 @@ This document outlines the key design choices, inherent limitations, and operati
 - **POSIX-Compliant Environment:** The system is built using POSIX C libraries and assumes a compatible environment (like Linux) for compilation and execution.
 - **File and Sentence Structure:**
     - A file is a collection of sentences.
-    - A sentence is strictly defined as a sequence of words ending with a period (`.`), exclamation mark (`!`), or question mark (`?`). These delimiters are treated as part of the sentence.
-    - Words, delimiters, and whitespace are tokenized separately, which affects word-level operations.
+    - A sentence is strictly defined as a sequence of words ending with a period (`.`), exclamation mark (`!`), or question mark (`?`).
+    - **Word and Delimiter Tokenization:** The system's tokenizer treats every component as a distinct "word":
+        - Alphanumeric words.
+        - Sentence delimiters (`.`, `!`, `?`). (sometimes)
+        - Whitespace characters (spaces, newlines).
+        - The INFO command doesn't consider delimiters as words.
+    - **Input Format Assumptions:** The system assumes that words and delimiters in any file content are separated by at least one space. The only exception is the final word of a sentence, which is immediately followed by its delimiter without a space (e.g., `"Hello world."`). This structure is critical for correct parsing.
 - **User Management:** The system assumes that usernames are unique. There is no explicit user registration system; a user is considered "registered" the first time they connect with a new username.
 
 ## 4. Declarations and Design Choices
@@ -41,6 +47,8 @@ This document outlines the key design choices, inherent limitations, and operati
     - **Temporary Write Files:** During a write operation, changes are made to a temporary file specific to the user's session. These changes are merged back into the main file only after the user commits the write, ensuring atomicity of the multi-step write operation.
 - **Hierarchical Folders:** The system supports a hierarchical folder structure (a bonus feature). File and folder metadata are managed in separate Tries on the Name Server.
 - **Checkpoints:** The implementation includes a checkpointing mechanism (a bonus feature) that allows the state of a file to be saved with a tag and reverted to later. Checkpoints are stored as distinct copies of the file on the Storage Server.
+- **Reconnection:** When a client disconnects and reconnects again, their information is preserved. (assuming nm doesn't go down)
+SS reconnection is also handled.
 
 
 ## 0. System Setup and Execution

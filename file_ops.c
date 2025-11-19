@@ -176,7 +176,7 @@ char** split_by_delimiters(const char *word, int *count) {
 
     for (int i = 0; i < *count; i++) {
         //printf("DEBUG split_by_delimiters part[%d] = '%s' (len=%zu, is_space=%d)\n", 
-            i, parts[i], strlen(parts[i]), is_space_token(parts[i]));
+            //i, parts[i], strlen(parts[i]), is_space_token(parts[i]));
     }
     
     return parts;
