@@ -538,6 +538,34 @@ Note: If SS crashes mid-stream, client detects connection loss and displays erro
 │ Client │                  │   NM   │
 └───┬────┘                  └───┬────┘
     │                           │
+    │ REMACCESS file user       │
+    ├──────────────────────────>│
+    │                           │
+    │                           │ Verify ownership
+    │                           │  - Search Trie
+    │                           │  - Check sender == owner
+    │                           │
+    │                           │ Check if user exists
+    │                           │  - Search registered_users[]
+    │                           │
+    │                           │ Update FileMetadata:
+    │                           │  - Add to ACL array
+    │                           │  - Set access level
+    │                           │
+    │                           │ Update Trie
+    │                           │ Update Cache
+    │                           │
+    │        ACK (SUCCESS)      │
+    │<──────────────────────────┤
+    │                           │
+    │ "Access removed!"         │
+    │                           │
+```
+```
+┌────────┐                  ┌────────┐
+│ Client │                  │   NM   │
+└───┬────┘                  └───┬────┘
+    │                           │
     │ REQUESTACCESS -R file     │
     ├──────────────────────────>│
     │                           │
@@ -579,6 +607,33 @@ Note: If SS crashes mid-stream, client detects connection loss and displays erro
     │                           │ Remove from queue
     │                           │
     │        ACK (SUCCESS)      │
+    │<──────────────────────────┤
+    │                           │
+```
+```
+┌────────┐                  ┌────────┐
+│ Owner  │                  │   NM   │
+└───┬────┘                  └───┬────┘
+    │                           │
+    │ VIEWREQUESTS              │
+    ├──────────────────────────>│
+    │                           │
+    │                           │ Filter access_requests[]
+    │                           │  - Find requests where
+    │                           │    file.owner == sender
+    │                           │
+    │  List of requests         │
+    │  [ID] user, file, access  │
+    │<──────────────────────────┤
+    │                           │
+    │ DENYREQUEST <id>          │
+    ├──────────────────────────>│
+    │                           │
+    │                           │ Verify ownership
+    │                           │ Deny Access (update ACL)
+    │                           │ Remove from queue
+    │                           │
+    │        ACK                │
     │<──────────────────────────┤
     │                           │
 ```
@@ -702,167 +757,465 @@ Note: .undo file is created before any write operation
       Only one level of undo is supported
 ```
 ```
-┌──────────────────────────────────────────────────────────┐
-│              Folder Hierarchy Example                    │
-└──────────────────────────────────────────────────────────┘
+Client                          NM                          
+  │                              │                          
+  │────── MSG_LIST ──────────────>│                          
+  │      (sender: username)       │                          
+  │                              │                          
+  │                              │ [Lock client_mutex]
+  │                              │ Collect connected users
+  │                              │ [Unlock client_mutex]
+  │                              │
+  │                              │ [Lock registered_users_mutex]
+  │                              │ Collect all registered users
+  │                              │ [Unlock registered_users_mutex]
+  │                              │
+  │                              │ Build response:
+  │                              │ "=== Connected Users ==="
+  │                              │ + online users list
+  │                              │ "=== All Registered Users ==="
+  │                              │ + all users list
+  │                              │
+  │<──── MSG_DATA (status=200) ──│
+  │      (data: formatted list)  │
+  │                              │
+  │ Display user list            │
+  │                              │
 
-Storage Structure:
-/
-├── file1.txt
-├── file2.txt
-├── projects/
-│   ├── report.txt
-│   ├── data.txt
-│   └── research/
-│       ├── notes.txt
-│       └── analysis.txt
-└── documents/
-    └── draft.txt
-
-┌──────────────────────────────────────────────────────────┐
-│ CREATEFOLDER Operation:                                  │
-├──────────────────────────────────────────────────────────┤
-│ Client → NM:                                             │
-│   CREATEFOLDER projects                                  │
-│                                                          │
-│ NM:                                                      │
-│   1. Check if folder exists in FolderTrie                │
-│   2. Select SS (round-robin)                             │
-│   3. Forward to SS                                       │
-│                                                          │
-│ SS:                                                      │
-│   4. mkdir(ss_storage/projects)                          │
-│   5. Return SUCCESS                                      │
-│                                                          │
-│ NM:                                                      │
-│   6. Insert into FolderTrie:                             │
-│      - path: "/projects"                                 │
-│      - owner: sender                                     │
-│      - ss_id: selected_ss                                │
-│      - created: timestamp                                │
-└──────────────────────────────────────────────────────────┘
-
-┌──────────────────────────────────────────────────────────┐
-│ MOVE Operation:                                          │
-├──────────────────────────────────────────────────────────┤
-│ Client → NM:                                             │
-│   MOVE report.txt projects                               │
-│                                                          │
-│ NM:                                                      │
-│   1. Check file ownership/access                         │
-│   2. Verify target folder exists                         │
-│   3. Get file's ss_id from Trie                          │
-│   4. Forward to SS with old_path and new_path            │
-│                                                          │
-│ SS:                                                      │
-│   5. rename(ss_storage/report.txt,                       │
-│             ss_storage/projects/report.txt)              │
-│   6. Move .undo file if exists                           │
-│   7. Return SUCCESS                                      │
-│                                                          │
-│ NM:                                                      │
-│   8. Update FileMetadata in Trie:                        │
-│      - folder_path: "/projects"                          │
-│   9. Update Cache                                        │
-└──────────────────────────────────────────────────────────┘
-
-┌──────────────────────────────────────────────────────────┐
-│ VIEWFOLDER Operation:                                    │
-├──────────────────────────────────────────────────────────┤
-│ Client → NM:                                             │
-│   VIEWFOLDER projects                                    │
-│                                                          │
-│ NM:                                                      │
-│   1. Get all files from Trie                             │
-│   2. Filter files where:                                 │
-│      - folder_path == "/projects"                        │
-│      - user has READ access                              │
-│   3. Return list                                         │
-│                                                          │
-│ Output:                                                  │
-│   report.txt                                             │
-│   data.txt                                               │
-└──────────────────────────────────────────────────────────┘
+Response Format:
+┌──────────────────────────────────┐
+│ === Connected Users ===         │
+│ alice (online)                   │
+│ bob (online)                     │
+│                                  │
+│ === All Registered Users ===    │
+│ alice                            │
+│ bob                              │
+│ charlie                          │
+│ dave                             │
+└──────────────────────────────────┘
 ```
 ```
-┌──────────────────────────────────────────────────────────┐
-│              Checkpoint System                           │
-└──────────────────────────────────────────────────────────┘
+Client                    NM                      SS
+  │                        │                       │
+  │─── MSG_EXEC ───────────>│                       │
+  │   (filename, sender)    │                       │
+  │                        │                       │
+  │                        │ Check read access     │
+  │                        │ for user             │
+  │                        │                       │
+  │                        │ Find SS for file      │
+  │                        │ (via cache/trie)     │
+  │                        │                       │
+  │                        │─── MSG_SS_INFO ──────>│
+  │                        │   (filename,          │
+  │                        │    data="READ_CONTENT")│
+  │                        │                       │
+  │                        │                       │ Parse file
+  │                        │                       │ Return content
+  │                        │                       │
+  │                        │<──── MSG_ACK ─────────│
+  │                        │     (status=200,      │
+  │                        │      data=file_content)│
+  │                        │                       │
+  │                        │ Execute commands:     │
+  │                        │ FILE *fp = popen(     │
+  │                        │    file_content, "r") │
+  │                        │                       │
+  │                        │ Capture output        │
+  │                        │                       │
+  │<──── MSG_DATA ─────────│                       │
+  │     (status=200,       │                       │
+  │      data=exec_output) │                       │
+  │                        │                       │
+  │ Display output         │                       │
+  │                        │                       │
 
-File Timeline:
-┌──────────────────────────────────────────────────────────┐
-│ document.txt                                             │
-│   Version 1: "Initial content."                          │
-│        ↓                                                 │
-│   [CHECKPOINT "v1"]  ← Saved as document.txt.checkpoint_v1
-│        ↓                                                 │
-│   Version 2: "Initial content. Added more."              │
-│        ↓                                                 │
-│   [CHECKPOINT "draft"]  ← document.txt.checkpoint_draft  │
-│        ↓                                                 │
-│   Version 3: "Initial content. Added more. Final."       │
-│        ↓                                                 │
-│   [CHECKPOINT "final"]  ← document.txt.checkpoint_final  │
-└──────────────────────────────────────────────────────────┘
+Error Cases:
+┌──────────────────────────────────────────────────┐
+│ ERR_ACCESS_DENIED (403) - No read access        │
+│ ERR_FILE_NOT_FOUND (404) - File doesn't exist   │
+│ ERR_SS_UNAVAILABLE (503) - SS not available     │
+│ ERR_SERVER_ERROR (500) - Execution failed       │
+└──────────────────────────────────────────────────┘
+```
+```
+Client                    NM                      SS
+  │                        │                       │
+  │─ MSG_CREATEFOLDER ─────>│                       │
+  │  (foldername, sender,   │                       │
+  │   target_path)          │                       │
+  │                        │                       │
+  │                        │ Build full path:      │
+  │                        │ if target_path empty: │
+  │                        │   full_path = /foldername│
+  │                        │ else:                 │
+  │                        │   full_path = target_path│
+  │                        │            /foldername│
+  │                        │                       │
+  │                        │ Search folder_trie    │
+  │                        │ (ERR_FILE_EXISTS)    │
+  │                        │                       │
+  │                        │ Get SS (round-robin)  │
+  │                        │                       │
+  │                        │── MSG_CREATEFOLDER ───>│
+  │                        │  (foldername,         │
+  │                        │   target_path)        │
+  │                        │                       │
+  │                        │                       │ Build full path:
+  │                        │                       │ ss_storage/target_path
+  │                        │                       │
+  │                        │                       │ Check if exists
+  │                        │                       │
+  │                        │                       │ Create recursively:
+  │                        │                       │ mkdir for each segment
+  │                        │                       │
+  │                        │<──── MSG_ACK ─────────│
+  │                        │     (status=200)      │
+  │                        │                       │
+  │                        │ Insert into folder_trie:│
+  │                        │ FolderMetadata {      │
+  │                        │   foldername,         │
+  │                        │   parent_path,        │
+  │                        │   owner, created,     │
+  │                        │   ss_id, acl[]        │
+  │                        │ }                     │
+  │                        │                       │
+  │<──── MSG_ACK ──────────│                       │
+  │     (status=200)       │                       │
+  │                        │                       │
+  │ Display: "Folder       │                       │
+  │  created successfully!"│                       │
+  │                        │                       │
 
-┌──────────────────────────────────────────────────────────┐
-│ CHECKPOINT Operation:                                    │
-├──────────────────────────────────────────────────────────┤
-│ Client → NM:                                             │
-│   CHECKPOINT document.txt v1                             │
-│                                                          │
-│ NM:                                                      │
-│   1. Check WRITE access                                  │
-│   2. Find SS from Trie                                   │
-│   3. Forward to SS                                       │
-│                                                          │
-│ SS:                                                      │
-│   4. Check if checkpoint already exists                  │
-│   5. Copy file:                                          │
-│      cp ss_storage/document.txt \                        │
-│         ss_storage/document.txt.checkpoint_v1            │
-│   6. Return SUCCESS                                      │
-└──────────────────────────────────────────────────────────┘
+Folder Structure Example:
+┌────────────────────────────────────────┐
+│ Root (/)                               │
+│ ├── project/                           │
+│ │   ├── src/                           │
+│ │   │   └── file.txt                   │
+│ │   └── docs/                          │
+│ └── backup/                            │
+│                                        │
+│ NM folder_trie stores:                 │
+│ - /project                             │
+│ - /project/src                         │
+│ - /project/docs                        │
+│ - /backup                              │
+└────────────────────────────────────────┘
+```
+```
 
-┌──────────────────────────────────────────────────────────┐
-│ LISTCHECKPOINTS Operation:                              │
-├──────────────────────────────────────────────────────────┤
-│ Client → NM:                                             │
-│   LISTCHECKPOINTS document.txt                           │
-│                                                          │
-│ NM → SS:                                                 │
-│   Forward request                                        │
-│                                                          │
-│ SS:                                                      │
-│   1. opendir(ss_storage)                                 │
-│   2. Find files matching "document.txt.checkpoint_*"     │
-│   3. Extract tag names                                   │
-│   4. Return list                                         │
-│                                                          │
-│ Output:                                                  │
-│   v1                                                     │
-│   draft                                                  │
-│   final                                                  │
-└──────────────────────────────────────────────────────────┘
+Client                    NM                      SS
+  │                        │                       │
+  │──── MSG_MOVE ──────────>│                       │
+  │    (filename, sender,   │                       │
+  │     target_path)        │                       │
+  │                        │                       │
+  │                        │ Search file in trie   │
+  │                        │ (ERR_FILE_NOT_FOUND) │
+  │                        │                       │
+  │                        │ Check permissions:    │
+  │                        │ - Owner OR            │
+  │                        │ - Has WRITE access   │
+  │                        │                       │
+  │                        │ Verify target folder  │
+  │                        │ exists (if not root)  │
+  │                        │                       │
+  │                        │ Get SS for file       │
+  │                        │                       │
+  │                        │──── MSG_MOVE ─────────>│
+  │                        │    (filename,         │
+  │                        │     target_path,      │
+  │                        │     data=old_path)    │
+  │                        │                       │
+  │                        │                       │ Build old/new paths:
+  │                        │                       │ old_full = storage/
+  │                        │                       │   old_path/filename
+  │                        │                       │ new_full = storage/
+  │                        │                       │   new_path/filename
+  │                        │                       │
+  │                        │                       │ rename(old_full, new_full)
+  │                        │                       │
+  │                        │                       │ Move .undo file too
+  │                        │                       │ (if exists)
+  │                        │                       │
+  │                        │<──── MSG_ACK ─────────│
+  │                        │     (status=200)      │
+  │                        │                       │
+  │                        │ Update file_meta:     │
+  │                        │ strcpy(file_meta->    │
+  │                        │   folder_path,        │
+  │                        │   target_path)        │
+  │                        │                       │
+  │                        │ Update trie & cache   │
+  │                        │                       │
+  │<──── MSG_ACK ──────────│                       │
+  │     (status=200)       │                       │
+  │                        │                       │
+  │ Display: "File moved   │                       │
+  │  successfully!"        │                       │
+  │                        │                       │
 
-┌──────────────────────────────────────────────────────────┐
-│ REVERT Operation:                                        │
-├──────────────────────────────────────────────────────────┤
-│ Client → NM:                                             │
-│   REVERT document.txt draft                              │
-│                                                          │
-│ NM:                                                      │
-│   1. Check WRITE access                                  │
-│   2. Forward to SS                                       │
-│                                                          │
-│ SS:                                                      │
-│   3. Create undo backup:                                 │
-│      cp document.txt document.txt.undo                   │
-│   4. Restore checkpoint:                                 │
-│      cp document.txt.checkpoint_draft document.txt       │
-│   5. Return SUCCESS                                      │
-│                                                          │
-│ Result: File reverted to "draft" checkpoint              │
-│         Previous version saved in .undo                  │
-└──────────────────────────────────────────────────────────┘
+Move Example:
+┌────────────────────────────────────────────────┐
+│ Before MOVE file.txt to /project/src:         │
+│   ss_storage_1/                               │
+│   ├── file.txt                                │
+│   └── project/src/                            │
+│                                               │
+│ After MOVE:                                   │
+│   ss_storage_1/                               │
+│   └── project/src/                            │
+│       └── file.txt                            │
+│                                               │
+│ FileMetadata updated:                         │
+│   folder_path: "" → "/project/src"           │
+└────────────────────────────────────────────────┘
+```
+```
+Client                          NM
+  │                              │
+  │──── MSG_VIEWFOLDER ──────────>│
+  │    (sender, target_path)      │
+  │                              │
+  │                              │ Check if viewing root:
+  │                              │ viewing_root = (path empty
+  │                              │                 or path == "/")
+  │                              │
+  │                              │ If not root:
+  │                              │   Search folder_trie
+  │                              │   (ERR_FILE_NOT_FOUND)
+  │                              │
+  │                              │ Get all files from file_trie
+  │                              │ trie_get_all_files()
+  │                              │
+  │                              │ Filter files:
+  │                              │ FOR each file:
+  │                              │   IF viewing_root:
+  │                              │     matches = (folder_path
+  │                              │                is empty)
+  │                              │   ELSE:
+  │                              │     matches = (folder_path
+  │                              │                == target_path)
+  │                              │
+  │                              │   IF matches AND has_access:
+  │                              │     Add filename to buffer
+  │                              │
+  │                              │ Build response:
+  │                              │ "file1.txt\nfile2.txt\n..."
+  │                              │ OR "(empty folder)"
+  │                              │
+  │<──── MSG_DATA (status=200) ──│
+  │     (data: file list)        │
+  │                              │
+  │ Display folder contents      │
+  │                              │
+
+Folder View Example:
+┌──────────────────────────────────┐
+│ VIEWFOLDER /project/src          │
+│                                  │
+│ Output:                          │
+│ main.c                           │
+│ utils.c                          │
+│ header.h                         │
+│                                  │
+│ VIEWFOLDER /empty                │
+│                                  │
+│ Output:                          │
+│ (empty folder)                   │
+└──────────────────────────────────┘
+```
+
+```
+Client                    NM                      SS
+  │                        │                       │
+  │─ MSG_VIEWCHECKPOINT ───>│                       │
+  │  (filename, sender,     │                       │
+  │   checkpoint_tag)       │                       │
+  │                        │                       │
+  │                        │ Check access          │
+  │                        │                       │
+  │                        │ Find SS for file      │
+  │                        │                       │
+  │                        │── MSG_VIEWCHECKPOINT ─>│
+  │                        │  (filename,           │
+  │                        │   checkpoint_tag)     │
+  │                        │                       │
+  │                        │                       │ Build checkpoint path:
+  │                        │                       │ checkpoint_path = 
+  │                        │                       │   filepath.checkpoint_tag
+  │                        │                       │
+  │                        │                       │ fopen(checkpoint_path, "r")
+  │                        │                       │
+  │                        │                       │ Read entire content:
+  │                        │                       │ fread(buffer, 1, 
+  │                        │                       │       MAX_BUFFER-1, file)
+  │                        │                       │
+  │                        │<──── MSG_ACK ─────────│
+  │                        │     (status=200,      │
+  │                        │      data=checkpoint_ │
+  │                        │           content)    │
+  │                        │                       │
+  │<──── MSG_ACK ──────────│                       │
+  │     (status=200,       │                       │
+  │      data=content)     │                       │
+  │                        │                       │
+  │ Display checkpoint     │                       │
+  │ content to user        │                       │
+  │                        │                       │
+
+Error Cases:
+┌──────────────────────────────────────────────────┐
+│ ERR_FILE_NOT_FOUND (404) - Checkpoint not found  │
+│ ERR_ACCESS_DENIED (403) - No access              │
+└──────────────────────────────────────────────────┘
+```
+```
+Client                    NM                      SS
+  │                        │                       │
+  │─ MSG_CHECKPOINT ───────>│                       │
+  │  (filename, sender,     │                       │
+  │   checkpoint_tag)       │                       │
+  │                        │                       │
+  │                        │ Check write access    │
+  │                        │ for user             │
+  │                        │                       │
+  │                        │ Find SS for file      │
+  │                        │                       │
+  │                        │─── MSG_CHECKPOINT ────>│
+  │                        │   (filename,          │
+  │                        │    checkpoint_tag)    │
+  │                        │                       │
+  │                        │                       │ Build checkpoint path:
+  │                        │                       │ filepath.checkpoint_tag
+  │                        │                       │
+  │                        │                       │ Check if exists
+  │                        │                       │ (ERR_FILE_EXISTS if yes)
+  │                        │                       │
+  │                        │                       │ Copy file to checkpoint:
+  │                        │                       │ src = fopen(filepath, "r")
+  │                        │                       │ dst = fopen(checkpoint, "w")
+  │                        │                       │ Copy bytes
+  │                        │                       │
+  │                        │<──── MSG_ACK ─────────│
+  │                        │     (status=200)      │
+  │                        │                       │
+  │<──── MSG_ACK ──────────│                       │
+  │     (status=200)       │                       │
+  │                        │                       │
+  │ Display: "Checkpoint   │                       │
+  │  'tag' created!"       │                       │
+  │                        │                       │
+
+Checkpoint File Structure:
+┌──────────────────────────────────────────────┐
+│ Storage Server Directory:                    │
+│   ss_storage_1/                              │
+│   ├── file.txt                               │
+│   ├── file.txt.checkpoint_v1                 │
+│   ├── file.txt.checkpoint_v2                 │
+│   └── file.txt.checkpoint_stable             │
+└──────────────────────────────────────────────┘
+```
+
+```
+Client                    NM                      SS
+  │                        │                       │
+  │─ MSG_LISTCHECKPOINTS ──>│                       │
+  │  (filename, sender)     │                       │
+  │                        │                       │
+  │                        │ Check access          │
+  │                        │                       │
+  │                        │ Find SS for file      │
+  │                        │                       │
+  │                        │── MSG_LISTCHECKPOINTS >│
+  │                        │  (filename)           │
+  │                        │                       │
+  │                        │                       │ Extract dir & filename
+  │                        │                       │ from filepath
+  │                        │                       │
+  │                        │                       │ opendir(dir_path)
+  │                        │                       │
+  │                        │                       │ Search for files matching:
+  │                        │                       │ "filename.checkpoint_*"
+  │                        │                       │
+  │                        │                       │ Extract tag names:
+  │                        │                       │ tag = entry->d_name + 
+  │                        │                       │       prefix_len
+  │                        │                       │
+  │                        │                       │ Build list of tags
+  │                        │                       │
+  │                        │<──── MSG_ACK ─────────│
+  │                        │     (status=200,      │
+  │                        │      data="v1\nv2\n   │
+  │                        │            stable\n") │
+  │                        │                       │
+  │<──── MSG_ACK ──────────│                       │
+  │     (status=200,       │                       │
+  │      data=checkpoint_list)│                    │
+  │                        │                       │
+  │ Display:               │                       │
+  │ "Checkpoints for file.txt:"│                   │
+  │ "v1"                   │                       │
+  │ "v2"                   │                       │
+  │ "stable"               │                       │
+  │                        │                       │
+
+Empty Case:
+┌──────────────────────────────────┐
+│ Display: "No checkpoints found." │
+└──────────────────────────────────┘
+```
+```
+Client                    NM                      SS
+  │                        │                       │
+  │─── MSG_REVERT ─────────>│                       │
+  │   (filename, sender,    │                       │
+  │    checkpoint_tag)      │                       │
+  │                        │                       │
+  │                        │ Check write access    │
+  │                        │                       │
+  │                        │ Find SS for file      │
+  │                        │                       │
+  │                        │──── MSG_REVERT ───────>│
+  │                        │    (filename,         │
+  │                        │     checkpoint_tag)   │
+  │                        │                       │
+  │                        │                       │ Build checkpoint path
+  │                        │                       │
+  │                        │                       │ Check checkpoint exists
+  │                        │                       │ (ERR_FILE_NOT_FOUND)
+  │                        │                       │
+  │                        │                       │ Create undo backup:
+  │                        │                       │ create_undo_backup(
+  │                        │                       │   filepath)
+  │                        │                       │
+  │                        │                       │ Copy checkpoint to file:
+  │                        │                       │ src = fopen(checkpoint, "r")
+  │                        │                       │ dst = fopen(filepath, "w")
+  │                        │                       │ Copy all bytes
+  │                        │                       │
+  │                        │<──── MSG_ACK ─────────│
+  │                        │     (status=200)      │
+  │                        │                       │
+  │<──── MSG_ACK ──────────│                       │
+  │     (status=200)       │                       │
+  │                        │                       │
+  │ Display: "File reverted│                       │
+  │  to checkpoint 'tag'!" │                       │
+  │                        │                       │
+
+Revert Process:
+┌────────────────────────────────────────────────────┐
+│ Before Revert:                                     │
+│   file.txt (current: "Hello World Modified")      │
+│   file.txt.checkpoint_v1 ("Hello World")          │
+│                                                    │
+│ After REVERT v1:                                   │
+│   file.txt ("Hello World")                        │
+│   file.txt.undo ("Hello World Modified")          │
+│   file.txt.checkpoint_v1 ("Hello World")          │
+└────────────────────────────────────────────────────┘
 ```
