@@ -20,6 +20,14 @@ static int is_space_token(const char *token) {
     return 1;
 }
 
+static int is_newline_token(const char *token) {
+    return (token && token[0] == '\n' && token[1] == '\0');
+}
+
+static int should_skip_for_indexing(const char *token) {
+    return is_space_token(token) || is_newline_token(token);
+}
+
 void free_file_content(FileContent *fc) {
     if (!fc) return;
     for (int i = 0; i < fc->sentence_count; i++) {
@@ -380,24 +388,18 @@ int write_file_content(const char *filepath, FileContent *fc) {
                         int cur_is_space = is_space_token(cur);
                         int next_is_space = is_space_token(next);
 
-                        // NEVER add space if current or next is a space token
-                        // Space tokens contain their own spacing
-                        if (cur_is_space || next_is_space) {
-                            // Don't add any space - the space token handles it
+                        // NEVER add space if current or next is already a space/newline token
+                        if (cur_is_space || next_is_space || cur_is_newline || next_is_newline) {
+                            continue;  // Space token handles its own spacing
+                        }
+                        
+                        // Don't add space between word and delimiter or delimiter and word
+                        if (cur_is_delim || next_is_delim) {
                             continue;
                         }
-
-                        size_t cur_len = strlen(cur);
-                        size_t next_len = strlen(next);
-                        int cur_ends_space = cur_len > 0 && isspace((unsigned char)cur[cur_len - 1]);
-                        int next_starts_space = next_len > 0 && isspace((unsigned char)next[0]);
-
-                        // added some checks - S
-                        if (!cur_is_delim && !next_is_delim && 
-                            !cur_is_newline && !next_is_newline && 
-                            !cur_ends_space && !next_starts_space) {
-                            fprintf(file, " ");
-                        }
+                        
+                        // Add space between two regular words
+                        fprintf(file, " ");
 
                     }
                 }
@@ -412,9 +414,8 @@ int write_file_content(const char *filepath, FileContent *fc) {
         if (i < fc->sentence_count - 1) {
             if (fc->sentences[i].word_count > 0) {
                 char *last = fc->sentences[i].words[fc->sentences[i].word_count - 1];
-                if (!(last[0] == '\n' && last[1] == '\0')) {
-                    size_t last_len = strlen(last);
-                    if(!(last_len>0 && isspace((unsigned char)last[last_len - 1])))
+                // Don't add space if sentence ends with newline or space token
+                if (!is_newline_token(last) && !is_space_token(last)) {
                     fprintf(file, " ");
                 }
             } else {
@@ -455,26 +456,22 @@ char* file_content_to_string(FileContent *fc) {
                     int cur_is_space = is_space_token(cur);
                     int next_is_space = is_space_token(next);
 
-                    if (cur_is_space || next_is_space) {
+                    if (cur_is_space || next_is_space || cur_is_newline || next_is_newline) {
                         continue;
                     }
-
-                    size_t cur_len = strlen(cur);
-                    size_t next_len = strlen(next);
-                    int cur_ends_space = cur_len > 0 && isspace((unsigned char)cur[cur_len - 1]);
-                    int next_starts_space = next_len > 0 && isspace((unsigned char)next[0]);
-
-                    //added some checks - S
-                    if (!cur_is_delim && !next_is_delim && !cur_is_newline && !next_is_newline && !cur_ends_space && !next_starts_space) {
-                        result[pos++] = ' ';
+                    
+                    if (cur_is_delim || next_is_delim) {
+                        continue;
                     }
+                    
+                    result[pos++] = ' ';
                 }
             }
         }
         if (i < fc->sentence_count - 1) {
             if (fc->sentences[i].word_count > 0) {
                 char *last = fc->sentences[i].words[fc->sentences[i].word_count - 1];
-                if (!(last[0] == '\n' && last[1] == '\0')) {
+                if (!is_newline_token(last) && !is_space_token(last)) {
                     result[pos++] = ' ';
                 }
             } else {
@@ -529,16 +526,43 @@ int insert_word_in_sentence(FileContent *fc, int sent_idx, int word_idx, const c
 
     
     Sentence *sent = &fc->sentences[sent_idx];
+
+    int real_word_count = 0;
+    for (int i = 0; i < sent->word_count; i++) {
+        if (!should_skip_for_indexing(sent->words[i])) {
+            real_word_count++;
+        }
+    }
     
     // word_idx is 1-based, validate directly - N
-    if (word_idx < 1 || word_idx > sent->word_count + 1) {
+    if (word_idx < 1 || word_idx > real_word_count + 1) {
         log_formatted(LOG_ERROR, "Invalid word index: %d (sentence has %d words, valid range: 1-%d)", 
-                     word_idx, sent->word_count, sent->word_count + 1);
+                     word_idx, real_word_count, real_word_count + 1);
         return -1;
     }
     
-    // Convert to 0-based - N
-    int actual_idx = word_idx - 1;
+    int actual_idx = 0;
+    int real_words_seen = 0;
+    
+    if (word_idx == 1) {
+        // Insert at beginning
+        actual_idx = 0;
+    } else {
+        // Find position after (word_idx - 1) real words
+        for (int i = 0; i < sent->word_count; i++) {
+            if (!should_skip_for_indexing(sent->words[i])) {
+                real_words_seen++;
+                if (real_words_seen == word_idx - 1) {
+                    actual_idx = i + 1;
+                    break;
+                }
+            }
+        }
+        // If we want to append (word_idx > real_word_count)
+        if (real_words_seen == real_word_count && word_idx == real_word_count + 1) {
+            actual_idx = sent->word_count;
+        }
+    }
     
     // Split word by delimiters - N
     int part_count;
@@ -595,7 +619,6 @@ int insert_word_in_sentence(FileContent *fc, int sent_idx, int word_idx, const c
     }
     
     // Insert parts
-    int current_sent_offset = 0;
     Sentence *cur_sent = &fc->sentences[sent_idx];
     int in_new_sentence = 0;
     
