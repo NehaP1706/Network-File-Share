@@ -627,6 +627,7 @@ Note: If SS crashes mid-stream, client detects connection loss and displays erro
     │                           │                           │
 
 ```
+```
 ┌────────┐                  ┌────────┐                  ┌────────┐
 │ Client │                  │   NM   │                  │   SS   │
 └───┬────┘                  └───┬────┘                  └───┬────┘
