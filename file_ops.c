@@ -359,67 +359,55 @@ int write_file_content(const char *filepath, FileContent *fc) {
     
     for (int i = 0; i < fc->sentence_count; i++) {
         for (int j = 0; j < fc->sentences[i].word_count; j++) {
-            // fprintf(file, "%s", fc->sentences[i].words[j]);
-            
-            // // Add space after non-delimiter words (except last word in sentence)
-            // if (j < fc->sentences[i].word_count - 1 && 
-            //     !is_delimiter(fc->sentences[i].words[j][0])) {
-            //     fprintf(file, " ");
-            // }
+            write_word_to_file(file, fc->sentences[i].words[j]);
 
-            //not doing this now - S
-                /* Only print a space if:
-               - this is not the last word in the sentence, and
-               - current token is not a delimiter, and
-               - next token is not a delimiter (so we don't get "word .") -S */ 
+            if (j < fc->sentences[i].word_count - 1) {
+                const char* cur = fc->sentences[i].words[j];
+                const char *next = fc->sentences[i].words[j + 1];
 
-                write_word_to_file(file, fc->sentences[i].words[j]);
+                int cur_is_delim = is_delimiter(cur[0]);
+                int next_is_delim = is_delimiter(next[0]);
+                int cur_is_newline = (cur[0] == '\n' && cur[1] == '\0');
+                int next_is_newline = (next[0] == '\n' && next[1] == '\0');
+                int cur_is_space = is_space_token(cur);
+                int next_is_space = is_space_token(next);
 
-                if (j < fc->sentences[i].word_count - 1) {
-                    const char* cur = fc->sentences[i].words[j];
-                    const char *next = (j + 1 < fc->sentences[i].word_count) ? 
-                               fc->sentences[i].words[j + 1] : NULL;
-
-                    if (next) {
-                        int cur_is_delim = is_delimiter(cur[0]);
-                        int next_is_delim = is_delimiter(next[0]);
-                        int cur_is_newline = (cur[0] == '\n' && cur[1] == '\0');
-                        int next_is_newline = (next[0] == '\n' && next[1] == '\0');
-                        int cur_is_space = is_space_token(cur);
-                        int next_is_space = is_space_token(next);
-
-                        // NEVER add space if current or next is already a space/newline token
-                        if (cur_is_space || next_is_space || cur_is_newline || next_is_newline) {
-                            continue;  // Space token handles its own spacing
-                        }
-                        
-                        // Don't add space between word and delimiter or delimiter and word
-                        if (cur_is_delim || next_is_delim) {
-                            continue;
-                        }
-                        
-                        // Add space between two regular words
-                        fprintf(file, " ");
-
-                    }
+                // NEVER add space if current or next is already a space/newline token
+                if (cur_is_space || next_is_space || cur_is_newline || next_is_newline) {
+                    continue;  // Space token handles its own spacing
                 }
+                
+                // Don't add space between word and delimiter or delimiter and word
+                if (cur_is_delim || next_is_delim) {
+                    continue;
+                }
+                
+                // Add space between two regular words
+                fprintf(file, " ");
+            }
 
             printf("DEBUG write token[%d][%d] = '%s' (is_space=%d)\n", i, j, fc->sentences[i].words[j], is_space_token(fc->sentences[i].words[j]));
-
         }
         
-        /* Add space between sentences (except after last), but avoid
-           inserting an extra space if the sentence already ends with a
-           newline token. */
+        // Handle space between sentences - FIXED SECTION
         if (i < fc->sentence_count - 1) {
             if (fc->sentences[i].word_count > 0) {
                 char *last = fc->sentences[i].words[fc->sentences[i].word_count - 1];
+                
                 // Don't add space if sentence ends with newline or space token
                 if (!is_newline_token(last) && !is_space_token(last)) {
-                    fprintf(file, " ");
+                    // Check if next sentence starts with space/newline token
+                    if (fc->sentences[i + 1].word_count > 0) {
+                        char *first_next = fc->sentences[i + 1].words[0];
+                        // Only add space if next sentence doesn't start with space/newline
+                        if (!is_space_token(first_next) && !is_newline_token(first_next)) {
+                            fprintf(file, " ");
+                        }
+                    } else {
+                        // Next sentence is empty, add space
+                        fprintf(file, " ");
+                    }
                 }
-            } else {
-                fprintf(file, " ");
             }
         }
     }
@@ -439,12 +427,6 @@ char* file_content_to_string(FileContent *fc) {
             if (pos + len + 2 < MAX_BUFFER) {
                 strcpy(result + pos, fc->sentences[i].words[j]);
                 pos += len;
-                
-                /* Only print a space if:
-               - this is not the last word in the sentence, and
-               - current token is not a delimiter, and
-               - next token is not a delimiter (so we don't get "word .") - S */
-  
 
                 if (j < fc->sentences[i].word_count - 1) {
                     const char *cur = fc->sentences[i].words[j];
@@ -468,14 +450,21 @@ char* file_content_to_string(FileContent *fc) {
                 }
             }
         }
+        
         if (i < fc->sentence_count - 1) {
             if (fc->sentences[i].word_count > 0) {
                 char *last = fc->sentences[i].words[fc->sentences[i].word_count - 1];
                 if (!is_newline_token(last) && !is_space_token(last)) {
-                    result[pos++] = ' ';
+                    // Check if next sentence starts with space/newline token
+                    if (fc->sentences[i + 1].word_count > 0) {
+                        char *first_next = fc->sentences[i + 1].words[0];
+                        if (!is_space_token(first_next) && !is_newline_token(first_next)) {
+                            result[pos++] = ' ';
+                        }
+                    } else {
+                        result[pos++] = ' ';
+                    }
                 }
-            } else {
-                result[pos++] = ' ';
             }
         }
     }
