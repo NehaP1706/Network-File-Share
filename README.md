@@ -1,6 +1,4 @@
-[![Review Assignment Due Date](https://classroom.github.com/assets/deadline-readme-button-22041afd0340ce965d47ae6ef1cefeee28c7c493a6346c4f15d667ab976d596c.svg)](https://classroom.github.com/a/0ek2UV58)
-
-DIRECTORY STRUCTURE:
+# DIRECTORY STRUCTURE:
 
 ```c
 course-project-shellshocked/
@@ -22,6 +20,10 @@ course-project-shellshocked/
 
 1 directory, 15 files
 ```
+# FLOW DIAGRAMS
+
+Understand the flow of control through various classes and data structures in the repo using the following illustrative figures:
+
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │                        NETWORK FILE SYSTEM                          │
