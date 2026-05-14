@@ -1466,7 +1466,7 @@ void* handle_ss_connection(void* arg) {
             memset(&meta, 0, sizeof(FileMetadata));
             strcpy(meta.filename, token);
             meta.ss_id = msg.ss_id;
-            strcpy(meta.owner, "system");
+            strcpy(meta.owner, "system");   
             meta.created = time(NULL);
             meta.modified = meta.created;
             meta.accessed = meta.created;
